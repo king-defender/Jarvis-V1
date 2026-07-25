@@ -6,17 +6,20 @@ jspm_packages/
 dist/
 build/
 out/
+coverage/
 
 # Databases & local stores
-*.sqlite3
-*.sqlite3-journal
-database/dev.sqlite3
+# MongoDB is generally run as a service/container. Exclude any local db exports:
+*.json.gz
+*.bson
+dump/
 data/
 
 # Environment files
 .env
 .env.local
 .env.*.local
+!.env.example
 
 # Logs
 *.log

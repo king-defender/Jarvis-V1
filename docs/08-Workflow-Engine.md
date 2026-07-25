@@ -30,7 +30,7 @@ Workflows coordinate complex sequences of execution commands. They are stateful,
 ```
 
 ### Lifecycle Status Definitions:
-* **PENDING:** Workflow record is created in SQLite; execution payload is validated.
+* **PENDING:** Workflow document is created in MongoDB; execution payload is validated.
 * **RUNNING:** Steps are being dispatched sequentially or in parallel.
 * **COMPLETED:** All steps finished successfully with zero fallback degradation.
 * **INTELLIGENCE_DEGRADED:** The workflow finished all steps, but one or more downstream steps triggered an AI fallback strategy (e.g. falling back to a cached DOM scraper output or a local Ollama model instead of GPT-4).
@@ -70,7 +70,7 @@ export interface WorkflowContext {
 
 ## 3. The Workflow Coordinator Blueprint
 
-The `WorkflowCoordinator` runs steps, evaluates rules, merges payloads, and records progress to the SQLite database.
+The `WorkflowCoordinator` runs steps, evaluates rules, merges payloads, and records progress to MongoDB.
 
 ```typescript
 import { RuleEngineEvaluator } from '../evaluation/rules/rule-evaluator'; // From Layer 3
@@ -101,7 +101,7 @@ export class WorkflowCoordinator {
   public async executeStep(step: WorkflowStep, runCommand: (cmd: string, payload: any) => Promise<any>): Promise<boolean> {
     // 1. Evaluate Rule Engine Gatekeeper (Layer 3)
     if (step.ruleGroupId) {
-      // In production, the rule group configuration is loaded from SQLite
+      // In production, the rule group configuration is loaded from MongoDB
       const ruleGroup = await this.loadRuleGroup(step.ruleGroupId);
       const isAllowed = RuleEngineEvaluator.evaluateGroup(this.context.accumulatedData, ruleGroup);
       
@@ -144,7 +144,7 @@ export class WorkflowCoordinator {
   }
 
   private async loadRuleGroup(groupId: string): Promise<any> {
-    // Dummy resolver: In production this queries SQLite `rule_groups` & `rule_conditions`
+    // Dummy resolver: In production this queries MongoDB rule_groups collection
     return { id: groupId, name: 'dummy', logicalOperator: 'AND', conditions: [] };
   }
 }

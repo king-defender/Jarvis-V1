@@ -14,8 +14,7 @@ The Command Engine processes all ingress triggers through a strict validation an
               ▼
     [ Zod Schema Validation ] 
               │
-              ▼
-   [ SQLite Directives Log ]  (Status: PENDING)
+              // [ MongoDB Directives Log ]  (Status: PENDING)
               │
               ▼
    [ Event: command.received ] 
@@ -74,7 +73,7 @@ import { ISystemEventBus } from './06-Event-System';
 export class ProductionCommandRouter {
   private registry: Map<string, CommandRegistration> = new Map();
   private eventBus: ISystemEventBus;
-  private db: any; // Relational Database Client wrapper (SQLite)
+  private db: any; // Document Database Client wrapper (MongoDB)
 
   constructor(eventBus: ISystemEventBus, dbClient: any) {
     this.eventBus = eventBus;
@@ -107,7 +106,7 @@ export class ProductionCommandRouter {
       throw validationErr;
     }
 
-    // 3. Log Directive as PENDING in SQLite
+    // 3. Log Directive as PENDING in MongoDB
     await this.logDirectiveToDb(directive, 'PENDING');
 
     // 4. Publish Event Bus Telemetry
@@ -158,28 +157,27 @@ export class ProductionCommandRouter {
   }
 
   private async logDirectiveToDb(directive: SystemCommandDirective, status: string): Promise<void> {
-    await this.db.run(
-      `INSERT INTO command_directives (transaction_id, command, timestamp, payload, user_id, trigger_source, bypass_cache, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        directive.transactionId,
-        directive.command,
-        directive.timestamp,
-        JSON.stringify(directive.payload),
-        directive.context.userId,
-        directive.context.triggerSource,
-        directive.context.bypassCache ? 1 : 0,
-        status
-      ]
-    );
+    await this.db.collection('command_directives').insertOne({
+      _id: directive.transactionId,
+      command: directive.command,
+      timestamp: new Date(directive.timestamp),
+      payload: directive.payload,
+      context: directive.context,
+      status: status
+    });
   }
 
   private async updateDirectiveInDb(txId: string, status: string, durationMs: number, errorMsg?: string): Promise<void> {
-    await this.db.run(
-      `UPDATE command_directives 
-       SET status = ?, execution_duration_ms = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE transaction_id = ?`,
-      [status, durationMs, errorMsg || null, txId]
+    await this.db.collection('command_directives').updateOne(
+      { _id: txId },
+      { 
+        $set: { 
+          status: status, 
+          executionDurationMs: durationMs, 
+          errorMessage: errorMsg || null,
+          updatedAt: new Date()
+        } 
+      }
     );
   }
 

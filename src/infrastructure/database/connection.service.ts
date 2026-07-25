@@ -1,0 +1,81 @@
+import { MongoClient, type Db } from 'mongodb';
+import type { SystemConfig } from '../../config.js';
+import type { ILoggingService } from '../services/logging.service.js';
+
+const COLLECTIONS = [
+  'user_profiles',
+  'command_directives',
+  'workflows',
+  'tasks',
+  'rule_groups',
+  'rule_conditions',
+] as const;
+
+export class DatabaseService {
+  private client: MongoClient | undefined;
+  private db: Db | undefined;
+
+  constructor(
+    private readonly config: SystemConfig,
+    private readonly log: ILoggingService,
+  ) {}
+
+  async connect(): Promise<void> {
+    this.client = new MongoClient(this.config.database.mongoUrl, {
+      serverSelectionTimeoutMS: this.config.database.timeoutMs,
+    });
+    await this.client.connect();
+    this.db = this.client.db(this.config.database.dbName);
+    this.log.info('MongoDB connected', {
+      dbName: this.config.database.dbName,
+    });
+  }
+
+  getDb(): Db {
+    if (!this.db) {
+      throw new Error('Database not connected');
+    }
+    return this.db;
+  }
+
+  /** Ensures collections/indexes exist (Mongo equivalent of SQL migrate). */
+  async migrate(): Promise<void> {
+    const db = this.getDb();
+
+    for (const name of COLLECTIONS) {
+      const existing = await db.listCollections({ name }).hasNext();
+      if (!existing) {
+        await db.createCollection(name);
+      }
+    }
+
+    await db.collection('user_profiles').createIndex({ user_id: 1 }, { unique: true });
+    await db
+      .collection('command_directives')
+      .createIndex({ transaction_id: 1 }, { unique: true });
+    await db.collection('command_directives').createIndex({ user_id: 1, status: 1 });
+    await db.collection('command_directives').createIndex({ command: 1 });
+    await db.collection('workflows').createIndex({ status: 1 });
+    await db.collection('tasks').createIndex({ workflow_id: 1 });
+    await db.collection('tasks').createIndex({ status: 1 });
+    await db.collection('rule_conditions').createIndex({ rule_group_id: 1 });
+
+    this.log.info('MongoDB collections and indexes are up to date');
+  }
+
+  async healthCheck(): Promise<boolean> {
+    if (!this.client || !this.db) {
+      return false;
+    }
+    await this.client.db('admin').command({ ping: 1 });
+    return true;
+  }
+
+  async destroy(): Promise<void> {
+    if (this.client) {
+      await this.client.close();
+      this.client = undefined;
+      this.db = undefined;
+    }
+  }
+}

@@ -1,195 +1,159 @@
 # Database Schema Spec
 
-CommandOS utilizes **SQLite** for its local transactional persistence layer due to its serverless, zero-configuration nature, and absolute performance when colocated on a single node. High-frequency transient data (e.g., DOM scraping cache) is stored in Redis, while durable application state resides in SQLite.
+CommandOS utilizes **MongoDB** for its persistence layer. The platform relies on MongoDB's flexible, document-oriented structure to represent hierarchical execution logs, nested workflow tasks, dynamic user profile schemas, and JSON rules configurations.
 
-## 1. Entity Relationship Overview
+---
+
+## 1. Collections Overview & Entity Map
 
 ```mermaid
 erDiagram
     user_profiles {
-        TEXT user_id PK
-        TEXT profile_data "JSON"
-        TEXT created_at
-        TEXT updated_at
-    }
-    
-    command_directives {
-        TEXT transaction_id PK
-        TEXT command
-        TEXT timestamp
-        TEXT payload "JSON"
-        TEXT user_id FK
-        TEXT trigger_source
-        INTEGER bypass_cache
-        TEXT status
-        TEXT error_message
-        INTEGER execution_duration_ms
-        TEXT created_at
-        TEXT updated_at
-    }
+        String userId PK
+        Object profileData
+        Date createdAt
+        Date updatedAt
+      }
+      
+      command_directives {
+        String transactionId PK
+        String command
+        Date timestamp
+        Object payload
+        Object context
+        String status
+        String errorMessage
+        Number executionDurationMs
+        Date createdAt
+        Date updatedAt
+      }
 
-    workflows {
-        TEXT id PK
-        TEXT name
-        TEXT status
-        TEXT input_payload "JSON"
-        TEXT output_payload "JSON"
-        INTEGER current_step_index
-        TEXT created_at
-        TEXT updated_at
-    }
+      workflows {
+        String id PK
+        String name
+        String status
+        Object inputPayload
+        Object outputPayload
+        Number currentStepIndex
+        Object variables
+        Array tasks "Subdocument Array"
+        Date createdAt
+        Date updatedAt
+      }
 
-    tasks {
-        TEXT id PK
-        TEXT workflow_id FK
-        TEXT name
-        TEXT status
-        TEXT command_directive_id FK "Nullable"
-        TEXT error_message
-        TEXT created_at
-        TEXT updated_at
-    }
+      rule_groups {
+        String id PK
+        String name
+        String logicalOperator
+        Array conditions "Subdocument Array"
+        Date createdAt
+        Date updatedAt
+      }
 
-    rule_groups {
-        TEXT id PK
-        TEXT name
-        TEXT logical_operator
-        TEXT created_at
-        TEXT updated_at
-    }
-
-    rule_conditions {
-        INTEGER id PK
-        TEXT rule_group_id FK
-        TEXT field
-        TEXT operator
-        TEXT value "JSON"
-        TEXT created_at
-    }
-
-    user_profiles ||--o{ command_directives : "initiates"
-    workflows ||--|{ tasks : "contains"
-    command_directives ||--o| tasks : "triggers"
-    rule_groups ||--|{ rule_conditions : "comprises"
+      user_profiles ||--o{ command_directives : "initiates"
+      workflows ||--|{ command_directives : "references"
 ```
 
 ---
 
-## 2. SQL DDL Specifications
+## 2. Collection Schema Specifications (Mongoose/TypeScript)
 
-```sql
--- Enforce Foreign Keys in SQLite at connection time:
--- PRAGMA foreign_keys = ON;
+### 1. User Profiles Collection (`user_profiles`)
+Stores dynamic candidate metrics, resumes, and integration credentials.
 
--- 1. USER PROFILES
-CREATE TABLE IF NOT EXISTS user_profiles (
-    user_id TEXT PRIMARY KEY,
-    profile_data TEXT NOT NULL, -- JSON string mapping user preferences/profile structures
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
+```typescript
+import { Schema, model } from 'mongoose';
 
--- 2. COMMAND DIRECTIVES (Audit Log & Queue Input)
-CREATE TABLE IF NOT EXISTS command_directives (
-    transaction_id TEXT PRIMARY KEY, -- UUIDv4
-    command TEXT NOT NULL,           -- Namespaced: "career.sync-linkedin"
-    timestamp TEXT NOT NULL,         -- Request timestamp (ISO 8601)
-    payload TEXT NOT NULL,           -- JSON string containing payload arguments
-    user_id TEXT NOT NULL,
-    trigger_source TEXT NOT NULL CHECK (trigger_source IN ('CLI', 'DASHBOARD', 'CRON', 'WEBHOOK')),
-    bypass_cache INTEGER NOT NULL CHECK (bypass_cache IN (0, 1)),
-    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED')),
-    error_message TEXT,
-    execution_duration_ms INTEGER,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    FOREIGN KEY (user_id) REFERENCES user_profiles(user_id) ON DELETE CASCADE
-);
+const UserProfileSchema = new Schema({
+  userId: { type: String, required: true, unique: true },
+  profileData: { type: Schema.Types.Map, of: Schema.Types.Mixed, required: true },
+}, { timestamps: true });
+```
 
--- 3. WORKFLOWS (Orchestration Engine State)
-CREATE TABLE IF NOT EXISTS workflows (
-    id TEXT PRIMARY KEY,             -- UUIDv4
-    name TEXT NOT NULL,              -- E.g., "job-application-pipeline"
-    status TEXT NOT NULL CHECK (status IN ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'INTELLIGENCE_DEGRADED')),
-    input_payload TEXT NOT NULL,     -- JSON string containing base input parameters
-    output_payload TEXT,             -- JSON string containing aggregated results
-    current_step_index INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
+### 2. Command Directives Collection (`command_directives`)
+Acts as the central audit trail and queue dispatcher record.
 
--- 4. TASKS (Atomic Workflow Executions)
-CREATE TABLE IF NOT EXISTS tasks (
-    id TEXT PRIMARY KEY,             -- UUIDv4
-    workflow_id TEXT NOT NULL,
-    name TEXT NOT NULL,              -- Actionable descriptive name
-    status TEXT NOT NULL CHECK (status IN ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'SKIPPED')),
-    command_directive_id TEXT,       -- Optional command linked to this execution task
-    error_message TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE,
-    FOREIGN KEY (command_directive_id) REFERENCES command_directives(transaction_id) ON DELETE SET NULL
-);
+```typescript
+const CommandDirectiveSchema = new Schema({
+  _id: { type: String, required: true }, // Map transactionId directly to _id
+  command: { type: String, required: true, index: true },
+  timestamp: { type: Date, required: true },
+  payload: { type: Schema.Types.Map, of: Schema.Types.Mixed, required: true },
+  context: {
+    userId: { type: String, required: true, index: true },
+    triggerSource: { type: String, enum: ['CLI', 'DASHBOARD', 'CRON', 'WEBHOOK'], required: true },
+    bypassCache: { type: Boolean, default: false }
+  },
+  status: { type: String, enum: ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED'], default: 'PENDING', index: true },
+  errorMessage: { type: String },
+  executionDurationMs: { type: Number }
+}, { timestamps: true });
+```
 
--- 5. RULE GROUPS (Rule Engine Configurations)
-CREATE TABLE IF NOT EXISTS rule_groups (
-    id TEXT PRIMARY KEY,             -- Unique config ID
-    name TEXT NOT NULL,              -- E.g., "minimum-salary-filter"
-    logical_operator TEXT NOT NULL CHECK (logical_operator IN ('AND', 'OR')),
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
+### 3. Workflows Collection (`workflows`)
+Orchestrates sequential task executions, storing execution steps and variable contexts as subdocuments.
 
--- 6. RULE CONDITIONS (Nested Rule Group Filters)
-CREATE TABLE IF NOT EXISTS rule_conditions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    rule_group_id TEXT NOT NULL,
-    field TEXT NOT NULL,             -- Dot-notation path: "job.salary.min"
-    operator TEXT NOT NULL CHECK (operator IN (
-        'GREATER_THAN_OR_EQUAL',
-        'LESS_THAN_OR_EQUAL',
-        'EQUALS',
-        'NOT_EQUALS',
-        'CONTAINS_ANY',
-        'CONTAINS_ALL',
-        'EXCLUDES'
-    )),
-    value TEXT NOT NULL,             -- JSON string (e.g. 100000, "TypeScript", ["Remote", "Hybrid"])
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    FOREIGN KEY (rule_group_id) REFERENCES rule_groups(id) ON DELETE CASCADE
-);
+```typescript
+const TaskSubSchema = new Schema({
+  id: { type: String, required: true }, // UUIDv4
+  name: { type: String, required: true },
+  status: { type: String, enum: ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'SKIPPED'], default: 'PENDING' },
+  commandDirectiveId: { type: String, ref: 'command_directives' },
+  errorMessage: { type: String }
+}, { timestamps: true });
+
+const WorkflowSchema = new Schema({
+  _id: { type: String, required: true }, // UUIDv4
+  name: { type: String, required: true },
+  status: { type: String, enum: ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'INTELLIGENCE_DEGRADED', 'PAUSED'], default: 'PENDING', index: true },
+  inputPayload: { type: Schema.Types.Map, of: Schema.Types.Mixed, required: true },
+  outputPayload: { type: Schema.Types.Map, of: Schema.Types.Mixed },
+  currentStepIndex: { type: Number, default: 0 },
+  variables: { type: Schema.Types.Map, of: Schema.Types.Mixed, default: {} }, // Accumulated context parameters
+  tasks: [TaskSubSchema] // Nested array of task executions
+}, { timestamps: true });
+```
+
+### 4. Rule Groups Collection (`rule_groups`)
+Houses user-defined deterministic filters.
+
+```typescript
+const RuleConditionSubSchema = new Schema({
+  field: { type: String, required: true }, // E.g., "job.salary.min"
+  operator: { type: String, enum: [
+    'GREATER_THAN_OR_EQUAL',
+    'LESS_THAN_OR_EQUAL',
+    'EQUALS',
+    'NOT_EQUALS',
+    'CONTAINS_ANY',
+    'CONTAINS_ALL',
+    'EXCLUDES'
+  ], required: true },
+  value: { type: Schema.Types.Mixed, required: true } // Can hold numbers, strings, or arrays
+});
+
+const RuleGroupSchema = new Schema({
+  _id: { type: String, required: true }, // Config UUID or ID slug
+  name: { type: String, required: true },
+  logicalOperator: { type: String, enum: ['AND', 'OR'], required: true },
+  conditions: [RuleConditionSubSchema]
+}, { timestamps: true });
 ```
 
 ---
 
-## 3. Database Indexes for High Performance
+## 3. Database Indexes for High-Performance Queries
 
-To ensure maximum performance during parallel queue executions and rapid control API lookups, the following index structures are implemented:
+MongoDB indexes optimize searches during high-throughput workflow execution runs:
 
-```sql
--- Speed up command searches by user and tracking status
-CREATE INDEX IF NOT EXISTS idx_command_directives_user_status ON command_directives(user_id, status);
-CREATE INDEX IF NOT EXISTS idx_command_directives_command ON command_directives(command);
+```javascript
+// Compound index for commands lookup per user
+db.command_directives.createIndex({ "context.userId": 1, "status": 1 });
+db.command_directives.createIndex({ "command": 1 });
 
--- Support rapid workflow updates and progress queries
-CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
-CREATE INDEX IF NOT EXISTS idx_tasks_workflow_id ON tasks(workflow_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+// Optimize workflows filtering based on execution states
+db.workflows.createIndex({ "status": 1 });
 
--- Accelerate condition evaluation queries when resolving rule groups
-CREATE INDEX IF NOT EXISTS idx_rule_conditions_group ON rule_conditions(rule_group_id);
+// Speed up fetching nested tasks status
+db.workflows.createIndex({ "tasks.id": 1 });
 ```
-
----
-
-## 4. TypeScript to SQLite Serialization Policies
-
-Since SQLite does not natively support array or rich object types, serialization policies are strictly enforced:
-
-| TypeScript Type | SQLite Storage Class | Storage Format / Policy |
-| --- | --- | --- |
-| `boolean` | `INTEGER` | Stored as `0` (false) or `1` (true). |
-| `Date` | `TEXT` | Stored as ISO 8601 string: `YYYY-MM-DDTHH:MM:SS.SSSZ`. UTC-normalized. |
-| `object` | `TEXT` | Stored as serialized JSON string (`JSON.stringify()`). |
-| `Array` | `TEXT` | Stored as serialized JSON array string. |

@@ -1,0 +1,13 @@
+node_modules
+dist
+.git
+.env
+.env.*
+!.env.example
+database/*.sqlite3
+database/*.sqlite3-journal
+data
+coverage
+*.log
+README.md
+docs

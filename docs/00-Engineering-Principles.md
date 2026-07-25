@@ -38,7 +38,7 @@ State corruption is a major issue in concurrent systems. CommandOS enforces deep
 
 * **Frozen Payloads:** Data passed between modules and skills are deeply cloned and frozen (`Object.freeze()`) to eliminate side effects during parallel task execution.
 * **Pure Context Propagation:** Workflows maintain execution context as an append-only sequence of immutable state steps. A task can read previous outputs, but cannot modify them.
-* **No Shared Memory:** Skills must not share in-memory states. If persistence is required, it must be performed through the Database Service (SQLite) or Cache Service (Redis).
+* **No Shared Memory:** Skills must not share in-memory states. If persistence is required, it must be performed through the Database Service (MongoDB) or Cache Service (Redis).
 
 ---
 
@@ -47,7 +47,7 @@ State corruption is a major issue in concurrent systems. CommandOS enforces deep
 CommandOS is designed to run efficiently on local developer machines as well as distributed cloud environments.
 
 * **Lightweight Footprint:** Keep local CPU and memory usage minimal. Heavy operations (e.g., Playwright scraping browser instances) must be pooled and recycled.
-* **SQLite as Source of Truth:** SQLite is the transactional database. All relational configurations, execution logs, and workflow states must use SQLite.
+* **MongoDB as Source of Truth:** MongoDB is the application database. All configurations, execution logs, and workflow states must use MongoDB.
 * **Redis Caching:** External API calls, DOM scraping responses, and intermediate LLM outputs must be cached in Redis with a default TTL to avoid redundant network overhead and API costs.
 
 ---
@@ -57,5 +57,5 @@ CommandOS is designed to run efficiently on local developer machines as well as 
 Every operation in the system must be trackable.
 
 * **Single Transaction Context:** Every system invocation starts with a `transactionId` (UUIDv4) that propagates through every layer (API, Command Engine, Workflow Engine, Rule Engine, Skills, and Infrastructure).
-* **Verbose Database Logs:** Execution logs (successes, warnings, and failures) are flushed to the `command_directives` and `tasks` tables in SQLite to enable debugging.
+* **Verbose Database Logs:** Execution logs (successes, warnings, and failures) are flushed to the `command_directives` and `workflows` collections in MongoDB to enable debugging.
 * **Reproducibility:** Given the same transaction payload, rule configurations, and cached website inputs, a workflow must be fully reproducible.

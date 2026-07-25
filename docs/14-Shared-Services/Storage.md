@@ -1,20 +1,19 @@
 # Storage Shared Service Specification
 
-The Storage Shared Service manages structured data tables (SQLite).
+The Storage Shared Service manages structured collections and document operations (MongoDB).
 
 ---
 
 ## 1. Description
-Maintains SQLite pools, runs migration queries, executes SQL, and enforces foreign key checks.
+Maintains MongoDB client pools, manages schema/model connection sessions, and runs document queries.
 
 ---
 
 ## 2. API Contract
 ```typescript
 export interface IStorageService {
-  execute(sql: string, params?: any[]): Promise<any[]>;
-  beginTransaction(): Promise<void>;
-  commitTransaction(): Promise<void>;
-  rollbackTransaction(): Promise<void>;
+  getDb(): any; // Returns MongoDB DB client instance
+  collection(name: string): any; // Fetch collection wrapper helper
+  startSession(): Promise<any>; // Starts a client session for transactions
 }
 ```
