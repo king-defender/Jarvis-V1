@@ -1,4 +1,4 @@
-# CommandOS
+# Jarvis-V1 (CommandOS)
 
 Deterministic command / workflow / rule platform. Specs are frozen at tag `docs-v1.0`.
 
