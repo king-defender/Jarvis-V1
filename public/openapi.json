@@ -1,0 +1,51 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Jarvis-V1 / CommandOS API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/health": {
+      "get": { "summary": "Health check", "responses": { "200": { "description": "OK" } } }
+    },
+    "/api/command": {
+      "post": { "summary": "Execute command", "responses": { "200": { "description": "Completed" }, "202": { "description": "Pending approval" } } }
+    },
+    "/api/workflows": {
+      "get": { "summary": "List workflows" },
+      "post": { "summary": "Start workflow" }
+    },
+    "/api/rules": {
+      "get": { "summary": "List rule groups" },
+      "post": { "summary": "Create/update rule group" }
+    },
+    "/api/approvals": {
+      "get": { "summary": "List pending approvals" }
+    },
+    "/api/tenants": {
+      "get": { "summary": "List tenants" },
+      "post": { "summary": "Create tenant" }
+    },
+    "/api/widgets": {
+      "get": { "summary": "List desktop widgets" }
+    },
+    "/api/metrics": {
+      "get": { "summary": "Metrics snapshot" }
+    },
+    "/api/plugins": {
+      "get": { "summary": "List loaded plugins" }
+    },
+    "/api/connectors": {
+      "get": { "summary": "List connectors" }
+    },
+    "/api/decision/evaluate": {
+      "post": { "summary": "Evaluate a decision policy" }
+    },
+    "/api/versions/workflows": {
+      "get": { "summary": "List versioned workflow artifacts" }
+    },
+    "/api/openapi.json": {
+      "get": { "summary": "OpenAPI document" }
+    }
+  }
+}

@@ -14,16 +14,34 @@ import { getCommunicationCommandRegistrations } from './domain/modules/communica
 import { getDevelopmentCommandRegistrations } from './domain/modules/development/development.module.js';
 import { getFinanceCommandRegistrations } from './domain/modules/finance/finance.module.js';
 import { getLearningCommandRegistrations } from './domain/modules/learning/learning.module.js';
+import { getPlatformCommandRegistrations } from './domain/modules/platform/platform.module.js';
 import { getStartupCommandRegistrations } from './domain/modules/startup/startup.module.js';
 import { getDemoWorkflowDefinition } from './domain/modules/system/demo.workflow.js';
 import { getSystemCommandRegistrations } from './domain/modules/system/system.module.js';
+import { DecisionEngine } from './evaluation/decision/decision-engine.js';
 import { ModelRouterService } from './infrastructure/ai/model-router.service.js';
 import { CacheService } from './infrastructure/cache/redis.service.js';
+import {
+  ConnectorRegistry,
+  HttpConnector,
+} from './infrastructure/connectors/connector.js';
 import { DatabaseService } from './infrastructure/database/connection.service.js';
+import {
+  MetricsService,
+  TracingService,
+} from './infrastructure/observability/metrics.js';
+import { PluginLoader } from './infrastructure/plugins/plugin-loader.js';
+import {
+  createAuditMiddleware,
+  createRateLimitMiddleware,
+} from './infrastructure/security/http-guards.js';
 import { BrowserService } from './infrastructure/services/browser.service.js';
+import { EmailService } from './infrastructure/services/email.service.js';
 import { SystemEventBus } from './infrastructure/services/event-bus.service.js';
+import { FilesystemService } from './infrastructure/services/filesystem.service.js';
 import { GitHubService } from './infrastructure/services/github.service.js';
 import { LoggingService } from './infrastructure/services/logging.service.js';
+import { NotificationService } from './infrastructure/services/notification.service.js';
 import { SchedulerService } from './infrastructure/services/scheduler.service.js';
 import { SearchService } from './infrastructure/services/search.service.js';
 import { StorageService } from './infrastructure/services/storage.service.js';
@@ -36,6 +54,7 @@ import {
 import { WorkflowRuntime } from './orchestration/workflow/workflow.runtime.js';
 import type { WorkflowDefinition } from './orchestration/workflow/workflow.types.js';
 import type { SystemCommandDirective } from './shared/types/command.types.js';
+import { VersionRegistry } from './shared/versioning/version-registry.js';
 
 function getParallelDemoWorkflow(): WorkflowDefinition {
   return {
@@ -90,6 +109,25 @@ async function main(): Promise<void> {
   const storage = new StorageService(database.getDb(), database.getClient());
   const approvalService = new ApprovalService(storage, eventBus);
   const tenantService = new TenantService(storage);
+  const filesystem = new FilesystemService(config.app.baseDataPath);
+  const email = new EmailService(storage, log);
+  const notifications = new NotificationService(storage, log);
+  const decisionEngine = new DecisionEngine();
+  const metrics = new MetricsService();
+  const tracing = new TracingService();
+  const connectors = new ConnectorRegistry();
+  const healthConnector = new HttpConnector('health-self');
+  await healthConnector.initialize({
+    baseUrl: `http://127.0.0.1:${config.app.port}/api/health`,
+    rateLimitLimit: 60,
+    rateLimitWindowMs: 60_000,
+  });
+  connectors.register(healthConnector);
+
+  const pluginLoader = new PluginLoader(path.resolve('plugins'), log);
+  await pluginLoader.loadAll();
+
+  const workflowVersions = new VersionRegistry<WorkflowDefinition>();
   const defaultTenant = await tenantService.ensureDefaultTenant();
   await tenantService.upsertUser({
     tenantId: defaultTenant.id,
@@ -160,14 +198,49 @@ async function main(): Promise<void> {
       startWorkflow: (input) => workflowRuntime.start(input),
       runCommand,
     }),
+    ...getPlatformCommandRegistrations({
+      storage,
+      filesystem,
+      email,
+      notifications,
+      modelRouter,
+      connectors,
+      eventBus,
+      decisionEngine,
+      ...(config.integrations.slackWebhookUrl
+        ? { slackWebhookUrl: config.integrations.slackWebhookUrl }
+        : {}),
+    }),
+    ...pluginLoader.getCommands(),
   ];
   for (const registration of registrations) {
     commandRouter.register(registration);
   }
 
-  workflowRuntime.register(getDemoWorkflowDefinition());
-  workflowRuntime.register(getCareerJobApplicationWorkflow());
-  workflowRuntime.register(getParallelDemoWorkflow());
+  const demoWorkflow = getDemoWorkflowDefinition();
+  const careerWorkflow = getCareerJobApplicationWorkflow();
+  const parallelWorkflow = getParallelDemoWorkflow();
+  workflowRuntime.register(demoWorkflow);
+  workflowRuntime.register(careerWorkflow);
+  workflowRuntime.register(parallelWorkflow);
+  workflowVersions.register({
+    name: demoWorkflow.name,
+    version: 1,
+    schemaVersion: 1,
+    definition: demoWorkflow,
+  });
+  workflowVersions.register({
+    name: careerWorkflow.name,
+    version: 1,
+    schemaVersion: 1,
+    definition: careerWorkflow,
+  });
+  workflowVersions.register({
+    name: parallelWorkflow.name,
+    version: 1,
+    schemaVersion: 1,
+    definition: parallelWorkflow,
+  });
 
   if (queue.isEnabled()) {
     workflowRuntime.setEnqueue(async (job) =>
@@ -184,6 +257,7 @@ async function main(): Promise<void> {
   });
 
   eventBus.subscribe('*', (event) => {
+    metrics.incr('events.total');
     log.info('system.event', {
       eventName: event.eventName,
       transactionId: event.transactionId,
@@ -195,6 +269,8 @@ async function main(): Promise<void> {
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
   app.use(transactionIdMiddleware);
+  app.use(createRateLimitMiddleware({ windowMs: 60_000, max: 300 }));
+  app.use(createAuditMiddleware(storage));
   app.use(
     '/dashboard',
     express.static(path.resolve('public/dashboard'), { index: 'index.html' }),
@@ -203,6 +279,9 @@ async function main(): Promise<void> {
     '/widgets',
     express.static(path.resolve('public/widgets'), { index: 'index.html' }),
   );
+  app.get('/openapi.json', (_req, res) => {
+    res.sendFile(path.resolve('public/openapi.json'));
+  });
   app.use(
     '/api',
     createApiRouter({
@@ -213,6 +292,12 @@ async function main(): Promise<void> {
       workflowRuntime,
       approvalService,
       tenantService,
+      metrics,
+      tracing,
+      plugins: pluginLoader,
+      connectors,
+      decisionEngine,
+      workflowVersions,
     }),
   );
 
@@ -224,8 +309,11 @@ async function main(): Promise<void> {
       workflows: workflowRuntime.list(),
       queueEnabled: queue.isEnabled(),
       tenant: defaultTenant.slug,
+      plugins: pluginLoader.list().map((p) => p.id),
+      connectors: connectors.list(),
       dashboard: `http://localhost:${config.app.port}/dashboard/`,
       widgets: `http://localhost:${config.app.port}/widgets/?id=status`,
+      openapi: `http://localhost:${config.app.port}/openapi.json`,
     });
   });
 

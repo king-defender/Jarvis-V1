@@ -28,6 +28,11 @@ const COLLECTIONS = [
   'automation_triggers',
   'tenants',
   'users',
+  'outbound_email',
+  'notifications',
+  'audit_log',
+  'decision_log',
+  'interview_prep',
 ] as const;
 
 export class DatabaseService {

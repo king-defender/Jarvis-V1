@@ -1,0 +1,12 @@
+{
+  "id": "hello-plugin",
+  "name": "Hello Plugin",
+  "version": "0.1.0",
+  "description": "Sample plugin manifest for PluginLoader",
+  "entry": "index.js",
+  "permissions": ["commands:read"],
+  "exports": {
+    "commands": [],
+    "events": []
+  }
+}

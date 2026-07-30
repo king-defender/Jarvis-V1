@@ -1,13 +1,24 @@
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { Router } from 'express';
 import { z } from 'zod';
 import type { SystemConfig } from '../../config.js';
+import type { DecisionEngine } from '../../evaluation/decision/decision-engine.js';
 import type { CacheService } from '../../infrastructure/cache/redis.service.js';
+import type { ConnectorRegistry } from '../../infrastructure/connectors/connector.js';
 import type { DatabaseService } from '../../infrastructure/database/connection.service.js';
+import type {
+  MetricsService,
+  TracingService,
+} from '../../infrastructure/observability/metrics.js';
+import type { PluginLoader } from '../../infrastructure/plugins/plugin-loader.js';
 import type { ApprovalService } from '../../orchestration/approval/approval.service.js';
 import type { WorkflowRuntime } from '../../orchestration/workflow/workflow.runtime.js';
+import type { WorkflowDefinition } from '../../orchestration/workflow/workflow.types.js';
 import { DEFAULT_DESKTOP_WIDGETS } from '../../infrastructure/services/widgets.js';
 import type { TenantService } from '../../infrastructure/services/tenant.service.js';
+import type { VersionRegistry } from '../../shared/versioning/version-registry.js';
 import {
   TriggerSourceSchema,
   type SystemCommandDirective,
@@ -52,6 +63,44 @@ const RuleGroupBodySchema = z.object({
     .default([]),
 });
 
+const DecisionBodySchema = z.object({
+  data: z.record(z.unknown()),
+  policy: z.object({
+    id: z.string(),
+    name: z.string(),
+    ruleGroup: z.object({
+      id: z.string(),
+      name: z.string(),
+      logicalOperator: z.enum(['AND', 'OR']),
+      conditions: z.array(
+        z.object({
+          field: z.string(),
+          operator: z.enum([
+            'GREATER_THAN_OR_EQUAL',
+            'LESS_THAN_OR_EQUAL',
+            'EQUALS',
+            'NOT_EQUALS',
+            'CONTAINS_ANY',
+            'CONTAINS_ALL',
+            'EXCLUDES',
+          ]),
+          value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+        }),
+      ),
+    }),
+    onMatch: z.object({
+      type: z.enum(['DISPATCH_COMMAND', 'TRIGGER_APPROVAL', 'SKIP', 'NOTIFY']),
+      command: z.string().optional(),
+      message: z.string().optional(),
+    }),
+    onMiss: z.object({
+      type: z.enum(['DISPATCH_COMMAND', 'TRIGGER_APPROVAL', 'SKIP', 'NOTIFY']),
+      command: z.string().optional(),
+      message: z.string().optional(),
+    }),
+  }),
+});
+
 export function createApiRouter(deps: {
   config: SystemConfig;
   database: DatabaseService;
@@ -60,6 +109,12 @@ export function createApiRouter(deps: {
   workflowRuntime: WorkflowRuntime;
   approvalService: ApprovalService;
   tenantService: TenantService;
+  metrics: MetricsService;
+  tracing: TracingService;
+  plugins: PluginLoader;
+  connectors: ConnectorRegistry;
+  decisionEngine: DecisionEngine;
+  workflowVersions: VersionRegistry<WorkflowDefinition>;
 }): Router {
   const router = Router();
   const requireAuth = createAuthMiddleware(deps.config);
@@ -75,6 +130,56 @@ export function createApiRouter(deps: {
         database: databaseOk ? 'up' : 'down',
         cache: cacheOk ? 'up' : 'down',
       },
+    });
+  });
+
+  router.get('/openapi.json', (_req, res) => {
+    const openapiPath = path.resolve('public/openapi.json');
+    res.type('application/json').send(fs.readFileSync(openapiPath, 'utf8'));
+  });
+
+  router.get('/metrics', requireAuth, (_req, res) => {
+    res.json({
+      metrics: deps.metrics.snapshot(),
+      traces: deps.tracing.recent(20),
+    });
+  });
+
+  router.get('/plugins', requireAuth, (_req, res) => {
+    res.json({ plugins: deps.plugins.list() });
+  });
+
+  router.get('/connectors', requireAuth, (_req, res) => {
+    res.json({ connectors: deps.connectors.list() });
+  });
+
+  router.post('/connectors/:id/test', requireAuth, async (req, res) => {
+    const connector = deps.connectors.get(String(req.params.id));
+    if (!connector) {
+      res.status(404).json({ error: 'UNKNOWN_CONNECTOR' });
+      return;
+    }
+    res.json(await connector.testConnection());
+  });
+
+  router.post('/decision/evaluate', requireAuth, (req, res) => {
+    const parsed = DecisionBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: 'VALIDATION_ERROR', message: parsed.error.message });
+      return;
+    }
+    const result = deps.decisionEngine.decide(parsed.data.data, parsed.data.policy);
+    res.json(result);
+  });
+
+  router.get('/versions/workflows', requireAuth, (_req, res) => {
+    res.json({
+      workflows: deps.workflowVersions.list().map((w) => ({
+        name: w.name,
+        version: w.version,
+        schemaVersion: w.schemaVersion,
+        isDeprecated: w.isDeprecated ?? false,
+      })),
     });
   });
 
@@ -107,6 +212,13 @@ export function createApiRouter(deps: {
     }
 
     const transactionId = req.transactionId ?? randomUUID();
+    const spanId = deps.tracing.start('command.execute', {
+      command: parsed.data.command,
+      transactionId,
+    });
+    const started = Date.now();
+    deps.metrics.incr('commands.total');
+
     const needsApproval =
       parsed.data.requireApproval === true ||
       deps.approvalService.requiresApproval(parsed.data.command);
@@ -118,6 +230,8 @@ export function createApiRouter(deps: {
         userId,
         transactionId,
       });
+      deps.metrics.incr('commands.pending_approval');
+      deps.tracing.end(spanId, { status: 'PENDING_REVIEW' });
       res.status(202).json({
         status: 'PENDING_REVIEW',
         approval,
@@ -140,6 +254,9 @@ export function createApiRouter(deps: {
 
     try {
       const result = await deps.commandRouter.route(directive);
+      deps.metrics.timing('commands.duration_ms', Date.now() - started);
+      deps.metrics.incr('commands.completed');
+      deps.tracing.end(spanId, { status: 'COMPLETED' });
       res.status(200).json({
         transactionId,
         command: directive.command,
@@ -153,6 +270,8 @@ export function createApiRouter(deps: {
         : message.includes('Invalid command payload')
           ? 400
           : 500;
+      deps.metrics.incr('commands.failed');
+      deps.tracing.end(spanId, { status: 'FAILED', error: message });
       res.status(statusCode).json({
         transactionId,
         command: directive.command,
@@ -334,6 +453,9 @@ export function createApiRouter(deps: {
       rules: await db().collection('rule_groups').countDocuments(),
       tenants: await deps.tenantService.listTenants(),
       widgets: DEFAULT_DESKTOP_WIDGETS,
+      plugins: deps.plugins.list(),
+      connectors: deps.connectors.list(),
+      metrics: deps.metrics.snapshot(),
     });
   });
 
