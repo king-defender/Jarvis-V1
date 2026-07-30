@@ -233,6 +233,7 @@ async function main(): Promise<void> {
       decisionEngine,
       approvalService,
       runCommand,
+      baseDataPath: config.app.baseDataPath,
       ...(config.integrations.slackWebhookUrl
         ? { slackWebhookUrl: config.integrations.slackWebhookUrl }
         : {}),

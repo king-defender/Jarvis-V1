@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SearchService } from './search.service.js';
 
 describe('SearchService', () => {
-  it('returns deterministic local job results', async () => {
+  it('returns search results from DDG or local fallback', async () => {
     const search = new SearchService({
       info() {},
       warn() {},
@@ -13,8 +13,10 @@ describe('SearchService', () => {
     });
 
     const results = await search.query('TypeScript engineer Remote', 3);
-    expect(results).toHaveLength(3);
-    expect(results[0]?.title).toContain('TypeScript');
-    expect(results[0]?.url).toMatch(/^https:\/\/jobs\.example\.com\//);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.length).toBeLessThanOrEqual(3);
+    expect(results[0]?.title.length).toBeGreaterThan(0);
+    expect(results[0]?.url).toMatch(/^https?:\/\//);
+    expect(results[0]?.snippet.length).toBeGreaterThan(0);
   });
 });

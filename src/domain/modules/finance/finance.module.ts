@@ -7,6 +7,7 @@ import {
   createSystemEvent,
   type ISystemEventBus,
 } from '../../../infrastructure/services/event-bus.service.js';
+import { ocrTask } from '../../tasks/index.js';
 import type { CommandRegistration } from '../../../shared/types/command.types.js';
 
 const ParseReceiptSchema = z.object({
@@ -63,8 +64,16 @@ export function getFinanceCommandRegistrations(deps: {
       schema: ParseReceiptSchema,
       handler: async (payload: z.infer<typeof ParseReceiptSchema>, context) => {
         let text = payload.receiptText ?? '';
+        let ocrEngine: string | undefined;
         if (!text && payload.receiptFilePath) {
-          text = await fs.readFile(payload.receiptFilePath, 'utf8');
+          const lower = payload.receiptFilePath.toLowerCase();
+          if (/\.(png|jpe?g|webp|gif|bmp|tiff?)$/.test(lower)) {
+            const ocr = await ocrTask(payload.receiptFilePath);
+            text = ocr.text;
+            ocrEngine = ocr.engine;
+          } else {
+            text = await fs.readFile(payload.receiptFilePath, 'utf8');
+          }
         }
         if (!text) {
           text = 'Cafe Example\nLatte 4.50\nSandwich 8.25\nTotal 12.75';
@@ -101,7 +110,7 @@ export function getFinanceCommandRegistrations(deps: {
           }),
         );
 
-        return { ...parsed, category, expenseId: id };
+        return { ...parsed, category, expenseId: id, ocrEngine };
       },
     },
     {

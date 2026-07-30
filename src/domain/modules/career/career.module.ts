@@ -80,18 +80,29 @@ export function getCareerCommandRegistrations(deps: CareerDeps): CommandRegistra
         if (payload.platform === 'github') {
           rawData = await deps.github.getUserProfile(payload.username);
         } else {
-          // LinkedIn crawl stub via browser shell (deterministic offline profile)
-          const page = await deps.browser.fetchPage(
-            `https://www.linkedin.com/in/${encodeURIComponent(payload.username)}`,
-          );
+          const profileUrl = `https://www.linkedin.com/in/${encodeURIComponent(payload.username)}`;
+          const page = await deps.browser.fetchPage(profileUrl);
+          const headings = page.html
+            ? [...page.html.matchAll(/<(h1|h2)[^>]*>([^<]{2,120})<\/\1>/gi)].map((m) =>
+                m[2]!.trim(),
+              )
+            : [];
+          const about =
+            page.text.match(/About\s+(.{80,400})/i)?.[1]?.trim() ||
+            page.text.slice(0, 500);
           rawData = {
             platform: 'linkedin',
             username: payload.username,
-            title: page.title,
-            summary:
-              page.text.slice(0, 500) ||
-              `LinkedIn profile stub for ${payload.username}`,
-            stub: page.text.length === 0,
+            url: profileUrl,
+            title: page.title || headings[0] || `${payload.username} | LinkedIn`,
+            headline: headings[1] ?? headings[0] ?? null,
+            summary: about || `LinkedIn profile for ${payload.username}`,
+            extractedHeadings: headings.slice(0, 8),
+            textLength: page.text.length,
+            crawlMode: page.mode,
+            authWallLikely:
+              page.text.length < 80 ||
+              /sign in|join linkedin|authwall/i.test(page.text + page.title),
           };
         }
 

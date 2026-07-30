@@ -1,3 +1,8 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { createWorker } from 'tesseract.js';
+import simpleGit from 'simple-git';
+
 export async function extractKeywordsTask(text: string, limit = 12): Promise<string[]> {
   const counts = new Map<string, number>();
   for (const token of text.toLowerCase().match(/\b[a-z][a-z0-9+#.()-]{2,}\b/g) ?? []) {
@@ -51,7 +56,6 @@ export function extractDomTask(html: string, selectorHint?: string): string[] {
 }
 
 export function parsePdfTextTask(raw: string): string {
-  // Offline stub: treat input as already-extracted text/PDF plaintext dump
   return raw.replace(/\u0000/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
@@ -66,21 +70,41 @@ export async function callLlmTask(
   return result.text;
 }
 
-export function ocrTask(imagePathOrText: string): string {
-  // Offline stub for OCR.task.md — pass-through for text dumps
-  return `OCR_STUB:${imagePathOrText.slice(0, 200)}`;
+/** OCR via Tesseract.js. Accepts image path or returns plaintext if no image file. */
+export async function ocrTask(imagePathOrText: string): Promise<{ text: string; engine: string }> {
+  try {
+    await fs.access(imagePathOrText);
+  } catch {
+    // Not a file path — treat as already-extracted text
+    return { text: imagePathOrText, engine: 'passthrough' };
+  }
+
+  const worker = await createWorker('eng');
+  try {
+    const {
+      data: { text },
+    } = await worker.recognize(imagePathOrText);
+    return { text: text.trim(), engine: 'tesseract.js' };
+  } finally {
+    await worker.terminate();
+  }
 }
 
-export async function gitCloneTask(
-  fsWrite: (path: string, content: string) => Promise<void>,
-  repoUrl: string,
-  targetPath: string,
-): Promise<{ path: string; stub: boolean }> {
-  await fsWrite(
-    `${targetPath}/CLONE_STUB.md`,
-    `# Clone stub\n\nRepo: ${repoUrl}\nReplace with real git clone in production.\n`,
-  );
-  return { path: targetPath, stub: true };
+export async function gitCloneTask(input: {
+  repoUrl: string;
+  targetPath: string;
+  branchName?: string;
+}): Promise<{ success: boolean; commitHash: string; path: string }> {
+  await fs.mkdir(path.dirname(input.targetPath), { recursive: true });
+  const git = simpleGit();
+  const cloneOptions = input.branchName
+    ? ['--depth', '1', '--branch', input.branchName]
+    : ['--depth', '1'];
+  await git.clone(input.repoUrl, input.targetPath, cloneOptions);
+  const repo = simpleGit(input.targetPath);
+  const log = await repo.log({ maxCount: 1 });
+  const commitHash = log.latest?.hash ?? '';
+  return { success: true, commitHash, path: input.targetPath };
 }
 
 export async function sendEmailTask(

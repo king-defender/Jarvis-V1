@@ -22,9 +22,12 @@ import {
 } from '../../skills/index.js';
 import {
   extractKeywordsTask,
+  gitCloneTask,
   matchResumeTask,
+  ocrTask,
   parseHtmlTask,
   parsePdfTextTask,
+  extractDomTask,
 } from '../../tasks/index.js';
 import type { CommandRegistration } from '../../../shared/types/command.types.js';
 
@@ -80,6 +83,7 @@ export interface PlatformDeps {
   decisionEngine: DecisionEngine;
   approvalService: import('../../../orchestration/approval/approval.service.js').ApprovalService;
   runCommand: (directive: import('../../../shared/types/command.types.js').SystemCommandDirective) => Promise<unknown>;
+  baseDataPath: string;
   slackWebhookUrl?: string;
   execute?: boolean;
 }
@@ -138,6 +142,53 @@ export function getPlatformCommandRegistrations(deps: PlatformDeps): CommandRegi
       handler: async (payload: { raw: string }) => ({ text: parsePdfTextTask(payload.raw) }),
     },
     {
+      command: 'platform.extract-dom',
+      schema: z.object({
+        html: z.string().min(1),
+        selectorHint: z.string().optional(),
+      }),
+      handler: async (payload: { html: string; selectorHint?: string }) => ({
+        nodes: extractDomTask(payload.html, payload.selectorHint),
+      }),
+    },
+    {
+      command: 'platform.ocr',
+      schema: z.object({
+        imagePath: z.string().min(1),
+      }),
+      handler: async (payload: { imagePath: string }) => ocrTask(payload.imagePath),
+    },
+    {
+      command: 'platform.git-clone',
+      schema: z.object({
+        repoUrl: z.string().url(),
+        targetPath: z.string().min(1),
+        branchName: z.string().optional(),
+      }),
+      handler: async (payload: {
+        repoUrl: string;
+        targetPath: string;
+        branchName?: string;
+      }) => {
+        const pathMod = await import('node:path');
+        const safeRelative = payload.targetPath.replace(/^[/\\]+/, '');
+        const target = pathMod.resolve(deps.baseDataPath, 'repos', safeRelative);
+        if (!target.startsWith(pathMod.resolve(deps.baseDataPath))) {
+          throw new Error('Clone path escapes data directory');
+        }
+        const cloneInput: {
+          repoUrl: string;
+          targetPath: string;
+          branchName?: string;
+        } = {
+          repoUrl: payload.repoUrl,
+          targetPath: target,
+        };
+        if (payload.branchName) cloneInput.branchName = payload.branchName;
+        return gitCloneTask(cloneInput);
+      },
+    },
+    {
       command: 'platform.fs-write',
       schema: z.object({
         path: z.string().min(1),
@@ -167,7 +218,7 @@ export function getPlatformCommandRegistrations(deps: PlatformDeps): CommandRegi
         const messageId = await withRetry(() =>
           deps.email.sendMail(payload.to, payload.subject, payload.html),
         );
-        return { messageId, status: 'queued_local' };
+        return { messageId, status: 'sent_or_queued' };
       },
     },
     {

@@ -1,27 +1,11 @@
-# Roadmap: Future Milestones
+# Remaining gaps closed
 
-This document details long-term goals.
+## Implemented in this pass
+* OCR via Tesseract.js (`platform.ocr`, finance receipt images)
+* Real git clone via simple-git (`platform.git-clone`)
+* LinkedIn sync uses browser crawl + structure extraction (auth-wall detection)
+* Search: SEARCH_API_URL → DuckDuckGo HTML → local fallback
+* React dashboard (`web/`) built to `/dashboard/`
 
----
-
-## 1. Scope
-* Multi-user profile databases. ✅
-* Desktop integration widgets. ✅
-* Multi-tenant cloud hosting options. ✅ (tenant model + Docker Compose)
-
-## 2. Production hardening (implemented)
-* Real ModelRouter tiers (Anthropic → Gemini → Ollama → offline). ✅
-* Playwright browser engine with fetch fallback. ✅
-* SMTP email via nodemailer (local queue if unset). ✅
-* Plugin entry loading (`plugins/*/index.cjs`). ✅
-* Decision Engine action execution (dispatch / approval / notify). ✅
-* GitHub + Slack connectors. ✅
-* Recovery retries + DLQ on workflow failure. ✅
-* RBAC roles on JWT + AES-256-GCM crypto APIs. ✅
-* Expanded dashboard + OpenAPI. ✅
-
-## 3. Still optional / environment-dependent
-* Live LLM output requires `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` / `OLLAMA_BASE_URL`
-* Real PNG screenshots require Playwright Chromium (`npx playwright install chromium`)
-* Outbound email requires SMTP_* env vars
-* GitHub/Slack connector health requires tokens/webhooks
+## Environment still required for live external services
+* AI provider keys, SMTP, GitHub/Slack tokens, Playwright Chromium

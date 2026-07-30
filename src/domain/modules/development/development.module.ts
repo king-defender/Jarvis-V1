@@ -8,6 +8,7 @@ import {
   createSystemEvent,
   type ISystemEventBus,
 } from '../../../infrastructure/services/event-bus.service.js';
+import { gitCloneTask } from '../../tasks/index.js';
 import type { CommandRegistration } from '../../../shared/types/command.types.js';
 
 const BoilerplateSchema = z.object({
@@ -23,6 +24,12 @@ const ReviewPrSchema = z.object({
 
 const AuditRepoSchema = z.object({
   repoPath: z.string().min(1),
+});
+
+const CloneRepoSchema = z.object({
+  repoUrl: z.string().url(),
+  folderName: z.string().min(1).default('cloned-repo'),
+  branchName: z.string().optional(),
 });
 
 const SECRET_PATTERNS = [
@@ -191,6 +198,32 @@ export function getDevelopmentCommandRegistrations(deps: {
         );
 
         return { issuesCount: vulnerabilities.length, vulnerabilities, healthScore };
+      },
+    },
+    {
+      command: 'development.clone-repo',
+      schema: CloneRepoSchema,
+      handler: async (payload: z.infer<typeof CloneRepoSchema>) => {
+        const targetPath = path.resolve(deps.baseDataPath, 'repos', payload.folderName);
+        const cloneInput: {
+          repoUrl: string;
+          targetPath: string;
+          branchName?: string;
+        } = {
+          repoUrl: payload.repoUrl,
+          targetPath,
+        };
+        if (payload.branchName) cloneInput.branchName = payload.branchName;
+        const result = await gitCloneTask(cloneInput);
+        deps.eventBus.publish(
+          createSystemEvent({
+            transactionId: randomUUID(),
+            eventName: 'development.repo_cloned',
+            payload: { path: result.path, commitHash: result.commitHash },
+            producer: 'DevelopmentModule',
+          }),
+        );
+        return result;
       },
     },
   ];
