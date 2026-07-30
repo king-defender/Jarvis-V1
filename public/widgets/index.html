@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jarvis Widget</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        font: 14px/1.4 "Segoe UI", sans-serif;
+        background: #111827;
+        color: #e5e7eb;
+        padding: 12px;
+      }
+      h1 { font-size: 14px; margin: 0 0 8px; color: #5eead4; }
+      ul { margin: 0; padding-left: 16px; }
+      .muted { color: #9ca3af; }
+      .ok { color: #34d399; }
+      .bad { color: #f87171; }
+    </style>
+  </head>
+  <body>
+    <h1 id="title">Widget</h1>
+    <div id="body" class="muted">Connecting…</div>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const widgetId = params.get("id") || location.pathname.split("/").filter(Boolean).pop() || "status";
+      const refresh = Number(params.get("refresh") || 15) * 1000;
+      let token = "";
+
+      async function ensureToken() {
+        if (token) return;
+        const data = await fetch("/api/auth/dev-token", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ userId: "widget-user" }),
+        }).then((r) => r.json());
+        token = data.token;
+      }
+
+      async function load() {
+        await ensureToken();
+        document.getElementById("title").textContent = widgetId;
+        const data = await fetch(`/api/widgets/${widgetId}/data`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }).then((r) => r.json());
+        const el = document.getElementById("body");
+        if (widgetId === "status") {
+          el.innerHTML = `DB: <span class="${data.database ? "ok" : "bad"}">${data.database ? "up" : "down"}</span><br/>Cache: <span class="${data.cache ? "ok" : "bad"}">${data.cache ? "up" : "down"}</span>`;
+        } else if (widgetId === "commands") {
+          el.innerHTML = `<ul>${(data.commands || []).map((c) => `<li>${c}</li>`).join("")}</ul>`;
+        } else if (widgetId === "workflows") {
+          el.innerHTML = `<ul>${(data.workflows || []).map((w) => `<li>${w}</li>`).join("")}</ul>`;
+        } else if (widgetId === "approvals") {
+          const items = data.approvals || [];
+          el.innerHTML = items.length
+            ? `<ul>${items.map((a) => `<li>${a.command}</li>`).join("")}</ul>`
+            : `<span class="ok">No pending approvals</span>`;
+        } else {
+          el.textContent = JSON.stringify(data);
+        }
+      }
+
+      load().catch((e) => {
+        document.getElementById("body").textContent = String(e);
+      });
+      setInterval(() => load().catch(() => {}), refresh);
+    </script>
+  </body>
+</html>

@@ -22,6 +22,12 @@ const COLLECTIONS = [
   'study_progress',
   'financial_expenses',
   'financial_reports',
+  'email_threads',
+  'sent_notifications',
+  'browser_crawl_cache',
+  'automation_triggers',
+  'tenants',
+  'users',
 ] as const;
 
 export class DatabaseService {
@@ -93,6 +99,11 @@ export class DatabaseService {
     await db.collection('competitor_profiles').createIndex({ domain_url: 1 }, { unique: true });
     await db.collection('learning_decks').createIndex({ deck_id: 1 }, { unique: true });
     await db.collection('financial_expenses').createIndex({ user_id: 1, transaction_date: 1 });
+    await db.collection('sent_notifications').createIndex({ id: 1 }, { unique: true });
+    await db.collection('browser_crawl_cache').createIndex({ url_hash: 1 }, { unique: true });
+    await db.collection('automation_triggers').createIndex({ id: 1 }, { unique: true });
+    await db.collection('tenants').createIndex({ slug: 1 }, { unique: true });
+    await db.collection('users').createIndex({ tenant_id: 1, email: 1 }, { unique: true });
 
     this.log.info('MongoDB collections and indexes are up to date');
   }

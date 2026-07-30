@@ -6,6 +6,8 @@ import type { CacheService } from '../../infrastructure/cache/redis.service.js';
 import type { DatabaseService } from '../../infrastructure/database/connection.service.js';
 import type { ApprovalService } from '../../orchestration/approval/approval.service.js';
 import type { WorkflowRuntime } from '../../orchestration/workflow/workflow.runtime.js';
+import { DEFAULT_DESKTOP_WIDGETS } from '../../infrastructure/services/widgets.js';
+import type { TenantService } from '../../infrastructure/services/tenant.service.js';
 import {
   TriggerSourceSchema,
   type SystemCommandDirective,
@@ -57,6 +59,7 @@ export function createApiRouter(deps: {
   commandRouter: CommandRouter;
   workflowRuntime: WorkflowRuntime;
   approvalService: ApprovalService;
+  tenantService: TenantService;
 }): Router {
   const router = Router();
   const requireAuth = createAuthMiddleware(deps.config);
@@ -329,7 +332,74 @@ export function createApiRouter(deps: {
       workflows: deps.workflowRuntime.list(),
       approvals: await deps.approvalService.listPending(),
       rules: await db().collection('rule_groups').countDocuments(),
+      tenants: await deps.tenantService.listTenants(),
+      widgets: DEFAULT_DESKTOP_WIDGETS,
     });
+  });
+
+  router.get('/tenants', requireAuth, async (_req, res) => {
+    res.json({ tenants: await deps.tenantService.listTenants() });
+  });
+
+  router.post('/tenants', requireAuth, async (req, res) => {
+    const name = typeof req.body?.name === 'string' ? req.body.name : '';
+    const slug = typeof req.body?.slug === 'string' ? req.body.slug : '';
+    if (!name || !slug) {
+      res.status(400).json({ error: 'name and slug required' });
+      return;
+    }
+    const tenant = await deps.tenantService.createTenant(name, slug);
+    res.status(201).json({ tenant });
+  });
+
+  router.get('/tenants/:tenantId/users', requireAuth, async (req, res) => {
+    res.json({
+      users: await deps.tenantService.listUsers(String(req.params.tenantId)),
+    });
+  });
+
+  router.post('/tenants/:tenantId/users', requireAuth, async (req, res) => {
+    const email = typeof req.body?.email === 'string' ? req.body.email : '';
+    const displayName =
+      typeof req.body?.displayName === 'string' ? req.body.displayName : email;
+    if (!email) {
+      res.status(400).json({ error: 'email required' });
+      return;
+    }
+    const user = await deps.tenantService.upsertUser({
+      tenantId: String(req.params.tenantId),
+      email,
+      displayName,
+      role: req.body?.role === 'admin' || req.body?.role === 'owner' ? req.body.role : 'member',
+    });
+    res.status(201).json({ user });
+  });
+
+  router.get('/widgets', requireAuth, (_req, res) => {
+    res.json({ widgets: DEFAULT_DESKTOP_WIDGETS });
+  });
+
+  router.get('/widgets/:id/data', requireAuth, async (req, res) => {
+    const id = String(req.params.id);
+    if (id === 'status') {
+      const databaseOk = await deps.database.healthCheck().catch(() => false);
+      const cacheOk = await deps.cache.healthCheck().catch(() => false);
+      res.json({ database: databaseOk, cache: cacheOk });
+      return;
+    }
+    if (id === 'commands') {
+      res.json({ commands: deps.commandRouter.listCommands() });
+      return;
+    }
+    if (id === 'approvals') {
+      res.json({ approvals: await deps.approvalService.listPending() });
+      return;
+    }
+    if (id === 'workflows') {
+      res.json({ workflows: deps.workflowRuntime.list() });
+      return;
+    }
+    res.status(404).json({ error: 'UNKNOWN_WIDGET' });
   });
 
   return router;

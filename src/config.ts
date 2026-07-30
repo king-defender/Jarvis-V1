@@ -57,6 +57,9 @@ export const SystemConfigSchema = z.object({
   search: z.object({
     apiUrl: z.string().optional(),
   }),
+  integrations: z.object({
+    slackWebhookUrl: z.string().optional(),
+  }),
 });
 
 export type SystemConfig = z.infer<typeof SystemConfigSchema>;
@@ -110,6 +113,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SystemConfig {
     },
     search: {
       apiUrl: env.SEARCH_API_URL || undefined,
+    },
+    integrations: {
+      slackWebhookUrl: env.SLACK_WEBHOOK_URL || undefined,
     },
   });
 

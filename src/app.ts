@@ -6,8 +6,11 @@ import { loadConfig } from './config.js';
 import { createApiRouter } from './control/api/router.js';
 import { transactionIdMiddleware } from './control/api/transaction.middleware.js';
 import { CommandRouter } from './control/command-engine/command.router.js';
+import { getAutomationCommandRegistrations } from './domain/modules/automation/automation.module.js';
+import { getBrowserModuleCommandRegistrations } from './domain/modules/browser/browser.module.js';
 import { getCareerCommandRegistrations } from './domain/modules/career/career.module.js';
 import { getCareerJobApplicationWorkflow } from './domain/modules/career/job-application.workflow.js';
+import { getCommunicationCommandRegistrations } from './domain/modules/communication/communication.module.js';
 import { getDevelopmentCommandRegistrations } from './domain/modules/development/development.module.js';
 import { getFinanceCommandRegistrations } from './domain/modules/finance/finance.module.js';
 import { getLearningCommandRegistrations } from './domain/modules/learning/learning.module.js';
@@ -24,6 +27,7 @@ import { LoggingService } from './infrastructure/services/logging.service.js';
 import { SchedulerService } from './infrastructure/services/scheduler.service.js';
 import { SearchService } from './infrastructure/services/search.service.js';
 import { StorageService } from './infrastructure/services/storage.service.js';
+import { TenantService } from './infrastructure/services/tenant.service.js';
 import { ApprovalService } from './orchestration/approval/approval.service.js';
 import {
   QueueService,
@@ -85,28 +89,20 @@ async function main(): Promise<void> {
 
   const storage = new StorageService(database.getDb(), database.getClient());
   const approvalService = new ApprovalService(storage, eventBus);
+  const tenantService = new TenantService(storage);
+  const defaultTenant = await tenantService.ensureDefaultTenant();
+  await tenantService.upsertUser({
+    tenantId: defaultTenant.id,
+    email: 'local@commandos.dev',
+    displayName: 'Local Owner',
+    role: 'owner',
+  });
 
   if (cache.isReady()) {
     queue.enable();
   }
 
   const commandRouter = new CommandRouter(eventBus, database.getDb());
-  const registrations = [
-    ...getSystemCommandRegistrations(),
-    ...getCareerCommandRegistrations({ storage, search, browser, github, eventBus }),
-    ...getDevelopmentCommandRegistrations({
-      storage,
-      github,
-      eventBus,
-      baseDataPath: config.app.baseDataPath,
-    }),
-    ...getStartupCommandRegistrations({ storage, browser, modelRouter, eventBus }),
-    ...getLearningCommandRegistrations({ storage, modelRouter, eventBus }),
-    ...getFinanceCommandRegistrations({ storage, eventBus }),
-  ];
-  for (const registration of registrations) {
-    commandRouter.register(registration);
-  }
 
   const workflowRuntime = new WorkflowRuntime(
     database.getDb(),
@@ -128,6 +124,47 @@ async function main(): Promise<void> {
     },
   );
 
+  const runCommand = async (directive: SystemCommandDirective) =>
+    commandRouter.route(directive);
+
+  const registrations = [
+    ...getSystemCommandRegistrations(),
+    ...getCareerCommandRegistrations({ storage, search, browser, github, eventBus }),
+    ...getDevelopmentCommandRegistrations({
+      storage,
+      github,
+      eventBus,
+      baseDataPath: config.app.baseDataPath,
+    }),
+    ...getStartupCommandRegistrations({ storage, browser, modelRouter, eventBus }),
+    ...getLearningCommandRegistrations({ storage, modelRouter, eventBus }),
+    ...getFinanceCommandRegistrations({ storage, eventBus }),
+    ...getCommunicationCommandRegistrations({
+      storage,
+      modelRouter,
+      eventBus,
+      ...(config.integrations.slackWebhookUrl
+        ? { webhookUrl: config.integrations.slackWebhookUrl }
+        : {}),
+    }),
+    ...getBrowserModuleCommandRegistrations({
+      storage,
+      browser,
+      eventBus,
+      baseDataPath: config.app.baseDataPath,
+    }),
+    ...getAutomationCommandRegistrations({
+      storage,
+      scheduler,
+      eventBus,
+      startWorkflow: (input) => workflowRuntime.start(input),
+      runCommand,
+    }),
+  ];
+  for (const registration of registrations) {
+    commandRouter.register(registration);
+  }
+
   workflowRuntime.register(getDemoWorkflowDefinition());
   workflowRuntime.register(getCareerJobApplicationWorkflow());
   workflowRuntime.register(getParallelDemoWorkflow());
@@ -146,17 +183,6 @@ async function main(): Promise<void> {
     await workflowRuntime.continueQueued(resumeId, job.userId);
   });
 
-  if (config.app.env === 'development' && process.env.ENABLE_DEMO_CRON === 'true') {
-    scheduler.registerJob('*/5 * * * *', async () => {
-      log.info('Demo cron tick');
-      await workflowRuntime.start({
-        name: 'system.demo',
-        userId: 'cron-user',
-        payload: { message: 'cron', followUp: 'cron-2' },
-      });
-    });
-  }
-
   eventBus.subscribe('*', (event) => {
     log.info('system.event', {
       eventName: event.eventName,
@@ -174,6 +200,10 @@ async function main(): Promise<void> {
     express.static(path.resolve('public/dashboard'), { index: 'index.html' }),
   );
   app.use(
+    '/widgets',
+    express.static(path.resolve('public/widgets'), { index: 'index.html' }),
+  );
+  app.use(
     '/api',
     createApiRouter({
       config,
@@ -182,6 +212,7 @@ async function main(): Promise<void> {
       commandRouter,
       workflowRuntime,
       approvalService,
+      tenantService,
     }),
   );
 
@@ -192,7 +223,9 @@ async function main(): Promise<void> {
       commands: commandRouter.listCommands().length,
       workflows: workflowRuntime.list(),
       queueEnabled: queue.isEnabled(),
+      tenant: defaultTenant.slug,
       dashboard: `http://localhost:${config.app.port}/dashboard/`,
+      widgets: `http://localhost:${config.app.port}/widgets/?id=status`,
     });
   });
 

@@ -1,29 +1,15 @@
 # Jarvis-V1 (CommandOS)
 
-Deterministic command / workflow / rule platform. Specs frozen at `docs-v1.0`.
+Deterministic command / workflow / rule platform.
 
-## Architecture
-
-```text
-src/
-  control/          # API, auth, command engine
-  orchestration/    # workflows, queue, approval
-  evaluation/       # rules, validators
-  domain/           # career, development, startup, learning, finance
-  infrastructure/   # db, cache, AI, shared services
-public/dashboard/   # Phase 3 local UI
-```
-
-## Completed roadmap
+## Roadmap status
 
 | Phase | Status |
 | --- | --- |
-| MVP / Sprint 0–1 | Done |
-| Sprint 2 workflows/queue/scheduler | Done |
-| Sprint 3 shared services | Done |
-| Sprint 4 Career E2E | Done |
-| Phase 2 Dev+Startup, parallel steps, async queue, approvals | Done |
-| Phase 3 Learning+Finance, ModelRouter, dashboard + rule editor | Done |
+| MVP / Sprint 0–4 | Done |
+| Phase 2–3 | Done |
+| Future (multi-user, multi-tenant, widgets) | Done |
+| Remaining domain modules (Communication, Automation, Browser) | Done |
 
 ## Quick start
 
@@ -35,21 +21,19 @@ npm run migrate
 npm run dev
 ```
 
-- API health: http://localhost:8080/api/health
 - Dashboard: http://localhost:8080/dashboard/
-
-## Key APIs
-
-- `POST /api/command`
-- `POST /api/workflows` (`async: true` enqueues when Redis is up)
-- `GET/POST /api/rules`
-- `GET /api/approvals` + `POST /api/approvals/:id/resolve`
-- `GET /api/dashboard/summary`
+- Widgets: http://localhost:8080/widgets/?id=status
 
 ## Modules
 
-Career, Development, Startup, Learning, Finance, System (`system.ping`, `system.demo`, `system.parallel-demo`).
+System, Career, Development, Startup, Learning, Finance, Communication, Automation, Browser.
 
-## Database
+## Multi-tenant / multi-user
 
-MongoDB — see `docs/26-ADR/ADR-004-MongoDB.md`.
+- `GET/POST /api/tenants`
+- `GET/POST /api/tenants/:tenantId/users`
+- Default tenant `default` seeded on boot
+
+## Desktop widgets
+
+Embeddable panels under `/widgets/?id=status|commands|approvals|workflows`.
