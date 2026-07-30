@@ -1,37 +1,29 @@
 # Jarvis-V1 (CommandOS)
 
-Deterministic command / workflow / rule platform. Specs are frozen at tag `docs-v1.0`.
+Deterministic command / workflow / rule platform. Specs frozen at `docs-v1.0`.
 
-## Architecture (5 layers)
+## Architecture
 
 ```text
 src/
   control/          # API, auth, command engine
-  orchestration/    # workflows, queue
+  orchestration/    # workflows, queue, approval
   evaluation/       # rules, validators
-  domain/           # modules + skills
+  domain/           # career, development, startup, learning, finance
   infrastructure/   # db, cache, AI, shared services
+public/dashboard/   # Phase 3 local UI
 ```
 
-Dependency flow is downward-only. See `docs/04-Folder-Structure.md`.
+## Completed roadmap
 
-## Sprint 0–4 (current)
-
-- Config (Zod + env)
-- Logging (Pino)
-- MongoDB (collections + indexes)
-- Redis cache client (optional at boot)
-- JWT auth middleware + dev token endpoint
-- Health API
-- Command Engine (`POST /api/command`)
-- Rule Engine evaluator
-- In-memory System Event Bus
-- Workflow Engine + Runtime (`POST /api/workflows`)
-- Queue service (BullMQ when Redis is up; inline fallback otherwise)
-- Scheduler service (node-cron)
-- Shared services: Browser, Search, GitHub, Storage
-- Career module + `career.job-application` workflow
-- Docker Compose (API + Mongo + Redis)
+| Phase | Status |
+| --- | --- |
+| MVP / Sprint 0–1 | Done |
+| Sprint 2 workflows/queue/scheduler | Done |
+| Sprint 3 shared services | Done |
+| Sprint 4 Career E2E | Done |
+| Phase 2 Dev+Startup, parallel steps, async queue, approvals | Done |
+| Phase 3 Learning+Finance, ModelRouter, dashboard + rule editor | Done |
 
 ## Quick start
 
@@ -43,36 +35,21 @@ npm run migrate
 npm run dev
 ```
 
-Health check:
+- API health: http://localhost:8080/api/health
+- Dashboard: http://localhost:8080/dashboard/
 
-```bash
-curl http://localhost:8080/api/health
-```
+## Key APIs
 
-Dev JWT (development only):
+- `POST /api/command`
+- `POST /api/workflows` (`async: true` enqueues when Redis is up)
+- `GET/POST /api/rules`
+- `GET /api/approvals` + `POST /api/approvals/:id/resolve`
+- `GET /api/dashboard/summary`
 
-```bash
-curl -X POST http://localhost:8080/api/auth/dev-token -H "content-type: application/json" -d "{\"userId\":\"local-user\"}"
-```
+## Modules
 
-Docker (full stack):
+Career, Development, Startup, Learning, Finance, System (`system.ping`, `system.demo`, `system.parallel-demo`).
 
-```bash
-docker compose up --build
-```
+## Database
 
-## Implementation order
-
-| Sprint | Focus |
-| --- | --- |
-| 0 | Monorepo foundation (this) |
-| 1 | Command Engine, Rule Engine, Event Bus |
-| 2 | Workflow Engine, Runtime, Queue, Scheduler |
-| 3 | Browser / Search / GitHub / Storage services |
-| 4 | Career module (first end-to-end workflow) |
-
-Do not change architecture docs unless implementation exposes a real problem. Treat `docs/` as contracts.
-
-## Database note
-
-Runtime uses **MongoDB** (`mongodb` driver). See `docs/26-ADR/ADR-004-MongoDB.md`.
+MongoDB — see `docs/26-ADR/ADR-004-MongoDB.md`.

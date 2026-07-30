@@ -14,6 +14,14 @@ const COLLECTIONS = [
   'resumes',
   'cover_letters',
   'applications',
+  'pending_approvals',
+  'repositories_audit',
+  'competitor_profiles',
+  'learning_syllabi',
+  'learning_decks',
+  'study_progress',
+  'financial_expenses',
+  'financial_reports',
 ] as const;
 
 export class DatabaseService {
@@ -79,6 +87,12 @@ export class DatabaseService {
     await db.collection('cover_letters').createIndex({ id: 1 }, { unique: true });
     await db.collection('applications').createIndex({ id: 1 }, { unique: true });
     await db.collection('applications').createIndex({ user_id: 1, status: 1 });
+    await db.collection('pending_approvals').createIndex({ id: 1 }, { unique: true });
+    await db.collection('pending_approvals').createIndex({ status: 1 });
+    await db.collection('repositories_audit').createIndex({ repo_path: 1 }, { unique: true });
+    await db.collection('competitor_profiles').createIndex({ domain_url: 1 }, { unique: true });
+    await db.collection('learning_decks').createIndex({ deck_id: 1 }, { unique: true });
+    await db.collection('financial_expenses').createIndex({ user_id: 1, transaction_date: 1 });
 
     this.log.info('MongoDB collections and indexes are up to date');
   }

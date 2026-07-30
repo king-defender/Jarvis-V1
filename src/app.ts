@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import express from 'express';
 import { loadConfig } from './config.js';
 import { createApiRouter } from './control/api/router.js';
@@ -7,8 +8,13 @@ import { transactionIdMiddleware } from './control/api/transaction.middleware.js
 import { CommandRouter } from './control/command-engine/command.router.js';
 import { getCareerCommandRegistrations } from './domain/modules/career/career.module.js';
 import { getCareerJobApplicationWorkflow } from './domain/modules/career/job-application.workflow.js';
+import { getDevelopmentCommandRegistrations } from './domain/modules/development/development.module.js';
+import { getFinanceCommandRegistrations } from './domain/modules/finance/finance.module.js';
+import { getLearningCommandRegistrations } from './domain/modules/learning/learning.module.js';
+import { getStartupCommandRegistrations } from './domain/modules/startup/startup.module.js';
 import { getDemoWorkflowDefinition } from './domain/modules/system/demo.workflow.js';
 import { getSystemCommandRegistrations } from './domain/modules/system/system.module.js';
+import { ModelRouterService } from './infrastructure/ai/model-router.service.js';
 import { CacheService } from './infrastructure/cache/redis.service.js';
 import { DatabaseService } from './infrastructure/database/connection.service.js';
 import { BrowserService } from './infrastructure/services/browser.service.js';
@@ -18,12 +24,45 @@ import { LoggingService } from './infrastructure/services/logging.service.js';
 import { SchedulerService } from './infrastructure/services/scheduler.service.js';
 import { SearchService } from './infrastructure/services/search.service.js';
 import { StorageService } from './infrastructure/services/storage.service.js';
+import { ApprovalService } from './orchestration/approval/approval.service.js';
 import {
   QueueService,
   WORKFLOW_TASK_QUEUE,
 } from './orchestration/queue/queue.service.js';
 import { WorkflowRuntime } from './orchestration/workflow/workflow.runtime.js';
+import type { WorkflowDefinition } from './orchestration/workflow/workflow.types.js';
 import type { SystemCommandDirective } from './shared/types/command.types.js';
+
+function getParallelDemoWorkflow(): WorkflowDefinition {
+  return {
+    name: 'system.parallel-demo',
+    steps: [
+      {
+        id: 'a',
+        name: 'ping-a',
+        command: 'system.ping',
+        payloadMapping: { message: 'alpha' },
+        retryAttempts: 0,
+        parallelGroup: 'wave-1',
+      },
+      {
+        id: 'b',
+        name: 'ping-b',
+        command: 'system.ping',
+        payloadMapping: { message: 'beta' },
+        retryAttempts: 0,
+        parallelGroup: 'wave-1',
+      },
+      {
+        id: 'c',
+        name: 'ping-c',
+        command: 'system.ping',
+        payloadMapping: { message: 'gamma' },
+        retryAttempts: 0,
+      },
+    ],
+  };
+}
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -38,28 +77,34 @@ async function main(): Promise<void> {
   const browser = new BrowserService(config, log);
   const search = new SearchService(log, config.search.apiUrl);
   const github = new GitHubService(config, log);
+  const modelRouter = new ModelRouterService(config, log);
 
   await database.connect();
   await database.migrate();
   await cache.connect();
 
   const storage = new StorageService(database.getDb(), database.getClient());
+  const approvalService = new ApprovalService(storage, eventBus);
 
   if (cache.isReady()) {
     queue.enable();
   }
 
   const commandRouter = new CommandRouter(eventBus, database.getDb());
-  for (const registration of getSystemCommandRegistrations()) {
-    commandRouter.register(registration);
-  }
-  for (const registration of getCareerCommandRegistrations({
-    storage,
-    search,
-    browser,
-    github,
-    eventBus,
-  })) {
+  const registrations = [
+    ...getSystemCommandRegistrations(),
+    ...getCareerCommandRegistrations({ storage, search, browser, github, eventBus }),
+    ...getDevelopmentCommandRegistrations({
+      storage,
+      github,
+      eventBus,
+      baseDataPath: config.app.baseDataPath,
+    }),
+    ...getStartupCommandRegistrations({ storage, browser, modelRouter, eventBus }),
+    ...getLearningCommandRegistrations({ storage, modelRouter, eventBus }),
+    ...getFinanceCommandRegistrations({ storage, eventBus }),
+  ];
+  for (const registration of registrations) {
     commandRouter.register(registration);
   }
 
@@ -85,14 +130,20 @@ async function main(): Promise<void> {
 
   workflowRuntime.register(getDemoWorkflowDefinition());
   workflowRuntime.register(getCareerJobApplicationWorkflow());
+  workflowRuntime.register(getParallelDemoWorkflow());
+
+  if (queue.isEnabled()) {
+    workflowRuntime.setEnqueue(async (job) =>
+      queue.addJob(WORKFLOW_TASK_QUEUE, job),
+    );
+  }
 
   queue.registerWorker(WORKFLOW_TASK_QUEUE, async (job) => {
-    await workflowRuntime.start({
-      name: job.command,
-      userId: job.userId,
-      payload: job.payload,
-      transactionId: job.transactionId,
-    });
+    const resumeId =
+      typeof job.payload.__resumeWorkflowId === 'string'
+        ? job.payload.__resumeWorkflowId
+        : job.workflowId;
+    await workflowRuntime.continueQueued(resumeId, job.userId);
   });
 
   if (config.app.env === 'development' && process.env.ENABLE_DEMO_CRON === 'true') {
@@ -119,6 +170,10 @@ async function main(): Promise<void> {
   app.use(express.json({ limit: '1mb' }));
   app.use(transactionIdMiddleware);
   app.use(
+    '/dashboard',
+    express.static(path.resolve('public/dashboard'), { index: 'index.html' }),
+  );
+  app.use(
     '/api',
     createApiRouter({
       config,
@@ -126,6 +181,7 @@ async function main(): Promise<void> {
       cache,
       commandRouter,
       workflowRuntime,
+      approvalService,
     }),
   );
 
@@ -133,9 +189,10 @@ async function main(): Promise<void> {
     log.info('CommandOS API listening', {
       port: config.app.port,
       env: config.app.env,
-      commands: commandRouter.listCommands(),
+      commands: commandRouter.listCommands().length,
       workflows: workflowRuntime.list(),
       queueEnabled: queue.isEnabled(),
+      dashboard: `http://localhost:${config.app.port}/dashboard/`,
     });
   });
 

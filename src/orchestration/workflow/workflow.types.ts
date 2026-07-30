@@ -6,6 +6,8 @@ export interface WorkflowStep {
   ruleGroupId?: string;
   retryAttempts: number;
   bypassCache?: boolean;
+  /** Steps sharing the same parallelGroup run concurrently. */
+  parallelGroup?: string;
 }
 
 export interface WorkflowDefinition {
