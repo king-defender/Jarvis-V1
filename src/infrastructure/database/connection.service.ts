@@ -9,6 +9,11 @@ const COLLECTIONS = [
   'tasks',
   'rule_groups',
   'rule_conditions',
+  'career_profiles',
+  'job_listings',
+  'resumes',
+  'cover_letters',
+  'applications',
 ] as const;
 
 export class DatabaseService {
@@ -38,6 +43,13 @@ export class DatabaseService {
     return this.db;
   }
 
+  getClient(): MongoClient {
+    if (!this.client) {
+      throw new Error('Database not connected');
+    }
+    return this.client;
+  }
+
   /** Ensures collections/indexes exist (Mongo equivalent of SQL migrate). */
   async migrate(): Promise<void> {
     const db = this.getDb();
@@ -59,6 +71,14 @@ export class DatabaseService {
     await db.collection('tasks').createIndex({ workflow_id: 1 });
     await db.collection('tasks').createIndex({ status: 1 });
     await db.collection('rule_conditions').createIndex({ rule_group_id: 1 });
+    await db.collection('career_profiles').createIndex({ id: 1 }, { unique: true });
+    await db.collection('career_profiles').createIndex({ user_id: 1, platform: 1 });
+    await db.collection('job_listings').createIndex({ id: 1 }, { unique: true });
+    await db.collection('job_listings').createIndex({ user_id: 1 });
+    await db.collection('resumes').createIndex({ id: 1 }, { unique: true });
+    await db.collection('cover_letters').createIndex({ id: 1 }, { unique: true });
+    await db.collection('applications').createIndex({ id: 1 }, { unique: true });
+    await db.collection('applications').createIndex({ user_id: 1, status: 1 });
 
     this.log.info('MongoDB collections and indexes are up to date');
   }

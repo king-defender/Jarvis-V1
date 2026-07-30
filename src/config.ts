@@ -51,6 +51,12 @@ export const SystemConfigSchema = z.object({
     monthlyLimitUsd: z.coerce.number().default(50),
     providerKey: z.string().optional(),
   }),
+  github: z.object({
+    token: z.string().optional(),
+  }),
+  search: z.object({
+    apiUrl: z.string().optional(),
+  }),
 });
 
 export type SystemConfig = z.infer<typeof SystemConfigSchema>;
@@ -98,6 +104,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SystemConfig {
       localModel: env.AI_LOCAL_MODEL,
       monthlyLimitUsd: env.AI_MONTHLY_LIMIT_USD,
       providerKey: env.AI_PROVIDER_KEY || undefined,
+    },
+    github: {
+      token: env.GITHUB_TOKEN || undefined,
+    },
+    search: {
+      apiUrl: env.SEARCH_API_URL || undefined,
     },
   });
 

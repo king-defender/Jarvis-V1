@@ -15,7 +15,7 @@ src/
 
 Dependency flow is downward-only. See `docs/04-Folder-Structure.md`.
 
-## Sprint 0–2 (current)
+## Sprint 0–4 (current)
 
 - Config (Zod + env)
 - Logging (Pino)
@@ -29,6 +29,8 @@ Dependency flow is downward-only. See `docs/04-Folder-Structure.md`.
 - Workflow Engine + Runtime (`POST /api/workflows`)
 - Queue service (BullMQ when Redis is up; inline fallback otherwise)
 - Scheduler service (node-cron)
+- Shared services: Browser, Search, GitHub, Storage
+- Career module + `career.job-application` workflow
 - Docker Compose (API + Mongo + Redis)
 
 ## Quick start

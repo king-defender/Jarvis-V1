@@ -5,13 +5,19 @@ import { loadConfig } from './config.js';
 import { createApiRouter } from './control/api/router.js';
 import { transactionIdMiddleware } from './control/api/transaction.middleware.js';
 import { CommandRouter } from './control/command-engine/command.router.js';
+import { getCareerCommandRegistrations } from './domain/modules/career/career.module.js';
+import { getCareerJobApplicationWorkflow } from './domain/modules/career/job-application.workflow.js';
 import { getDemoWorkflowDefinition } from './domain/modules/system/demo.workflow.js';
 import { getSystemCommandRegistrations } from './domain/modules/system/system.module.js';
 import { CacheService } from './infrastructure/cache/redis.service.js';
 import { DatabaseService } from './infrastructure/database/connection.service.js';
+import { BrowserService } from './infrastructure/services/browser.service.js';
 import { SystemEventBus } from './infrastructure/services/event-bus.service.js';
+import { GitHubService } from './infrastructure/services/github.service.js';
 import { LoggingService } from './infrastructure/services/logging.service.js';
 import { SchedulerService } from './infrastructure/services/scheduler.service.js';
+import { SearchService } from './infrastructure/services/search.service.js';
+import { StorageService } from './infrastructure/services/storage.service.js';
 import {
   QueueService,
   WORKFLOW_TASK_QUEUE,
@@ -29,10 +35,15 @@ async function main(): Promise<void> {
   const cache = new CacheService(config, log);
   const queue = new QueueService(config, log);
   const scheduler = new SchedulerService();
+  const browser = new BrowserService(config, log);
+  const search = new SearchService(log, config.search.apiUrl);
+  const github = new GitHubService(config, log);
 
   await database.connect();
   await database.migrate();
   await cache.connect();
+
+  const storage = new StorageService(database.getDb(), database.getClient());
 
   if (cache.isReady()) {
     queue.enable();
@@ -40,6 +51,15 @@ async function main(): Promise<void> {
 
   const commandRouter = new CommandRouter(eventBus, database.getDb());
   for (const registration of getSystemCommandRegistrations()) {
+    commandRouter.register(registration);
+  }
+  for (const registration of getCareerCommandRegistrations({
+    storage,
+    search,
+    browser,
+    github,
+    eventBus,
+  })) {
     commandRouter.register(registration);
   }
 
@@ -64,6 +84,7 @@ async function main(): Promise<void> {
   );
 
   workflowRuntime.register(getDemoWorkflowDefinition());
+  workflowRuntime.register(getCareerJobApplicationWorkflow());
 
   queue.registerWorker(WORKFLOW_TASK_QUEUE, async (job) => {
     await workflowRuntime.start({
@@ -74,7 +95,6 @@ async function main(): Promise<void> {
     });
   });
 
-  // Example cron registration (disabled by default; enable via env later)
   if (config.app.env === 'development' && process.env.ENABLE_DEMO_CRON === 'true') {
     scheduler.registerJob('*/5 * * * *', async () => {
       log.info('Demo cron tick');
@@ -123,6 +143,7 @@ async function main(): Promise<void> {
     log.info('Shutting down', { signal });
     scheduler.stopAll();
     server.close();
+    await browser.closeAll();
     await queue.close();
     await cache.disconnect();
     await database.destroy();
