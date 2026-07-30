@@ -5,25 +5,23 @@ This document details long-term goals.
 ---
 
 ## 1. Scope
-* Multi-user profile databases. ✅ (`users` + `user_profiles`, tenant-scoped APIs)
-* Desktop integration widgets. ✅ (`/widgets/?id=...` embeddable panels)
-* Multi-tenant cloud hosting options. ✅ (tenant model + APIs; deploy via Docker Compose/cloud Mongo)
+* Multi-user profile databases. ✅
+* Desktop integration widgets. ✅
+* Multi-tenant cloud hosting options. ✅ (tenant model + Docker Compose)
 
-## 2. Also completed with this milestone
-* Communication module ✅
-* Automation module ✅
-* Browser module ✅
+## 2. Production hardening (implemented)
+* Real ModelRouter tiers (Anthropic → Gemini → Ollama → offline). ✅
+* Playwright browser engine with fetch fallback. ✅
+* SMTP email via nodemailer (local queue if unset). ✅
+* Plugin entry loading (`plugins/*/index.cjs`). ✅
+* Decision Engine action execution (dispatch / approval / notify). ✅
+* GitHub + Slack connectors. ✅
+* Recovery retries + DLQ on workflow failure. ✅
+* RBAC roles on JWT + AES-256-GCM crypto APIs. ✅
+* Expanded dashboard + OpenAPI. ✅
 
-## 3. Platform surfaces (docs 12–35) completed
-* Tasks library (`src/domain/tasks`) ✅
-* Skills library (`src/domain/skills`) + `career.prepare-interview` ✅
-* Filesystem / Email / Notification services ✅
-* Decision Engine + `/api/decision/evaluate` ✅
-* Recovery (retry/classify/saga helpers) ✅
-* Connectors registry + `/api/connectors` ✅
-* Plugin loader + sample `plugins/hello-plugin` ✅
-* Observability metrics/tracing + `/api/metrics` ✅
-* Rate limit + audit middleware ✅
-* OpenAPI (`/openapi.json`, `/api/openapi.json`) ✅
-* CI workflow (`.github/workflows/ci.yml`) ✅
-* Version registry (`/api/versions/workflows`) ✅
+## 3. Still optional / environment-dependent
+* Live LLM output requires `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` / `OLLAMA_BASE_URL`
+* Real PNG screenshots require Playwright Chromium (`npx playwright install chromium`)
+* Outbound email requires SMTP_* env vars
+* GitHub/Slack connector health requires tokens/webhooks

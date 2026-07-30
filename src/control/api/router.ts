@@ -18,6 +18,8 @@ import type { WorkflowRuntime } from '../../orchestration/workflow/workflow.runt
 import type { WorkflowDefinition } from '../../orchestration/workflow/workflow.types.js';
 import { DEFAULT_DESKTOP_WIDGETS } from '../../infrastructure/services/widgets.js';
 import type { TenantService } from '../../infrastructure/services/tenant.service.js';
+import type { IStorageService } from '../../infrastructure/services/storage.service.js';
+import type { INotificationService } from '../../infrastructure/services/notification.service.js';
 import type { VersionRegistry } from '../../shared/versioning/version-registry.js';
 import {
   TriggerSourceSchema,
@@ -25,6 +27,11 @@ import {
 } from '../../shared/types/command.types.js';
 import { createAuthMiddleware, createDevToken } from '../auth/auth.middleware.js';
 import type { CommandRouter } from '../command-engine/command.router.js';
+import { canExecuteCommand } from '../../infrastructure/security/rbac.js';
+import {
+  decryptString,
+  encryptString,
+} from '../../infrastructure/security/encryption.js';
 
 const ExecuteCommandBodySchema = z.object({
   command: z.string().min(1),
@@ -115,6 +122,8 @@ export function createApiRouter(deps: {
   connectors: ConnectorRegistry;
   decisionEngine: DecisionEngine;
   workflowVersions: VersionRegistry<WorkflowDefinition>;
+  storage: IStorageService;
+  notifications: INotificationService;
 }): Router {
   const router = Router();
   const requireAuth = createAuthMiddleware(deps.config);
@@ -162,13 +171,32 @@ export function createApiRouter(deps: {
     res.json(await connector.testConnection());
   });
 
-  router.post('/decision/evaluate', requireAuth, (req, res) => {
+  router.post('/decision/evaluate', requireAuth, async (req, res) => {
     const parsed = DecisionBodySchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json({ error: 'VALIDATION_ERROR', message: parsed.error.message });
       return;
     }
-    const result = deps.decisionEngine.decide(parsed.data.data, parsed.data.policy);
+    const execute = req.body?.execute !== false;
+    const userId = req.user?.userId ?? 'local-user';
+    if (!execute) {
+      res.json(deps.decisionEngine.decide(parsed.data.data, parsed.data.policy));
+      return;
+    }
+    const result = await deps.decisionEngine.decideAndExecute(
+      parsed.data.data,
+      parsed.data.policy,
+      {
+        userId,
+        storage: deps.storage,
+        approvalService: deps.approvalService,
+        notifications: deps.notifications,
+        runCommand: (directive) => deps.commandRouter.route(directive),
+        ...(deps.config.integrations.slackWebhookUrl
+          ? { slackWebhookUrl: deps.config.integrations.slackWebhookUrl }
+          : {}),
+      },
+    );
     res.json(result);
   });
 
@@ -192,7 +220,36 @@ export function createApiRouter(deps: {
       typeof req.body?.userId === 'string' && req.body.userId.length > 0
         ? req.body.userId
         : 'local-user';
-    res.json({ token: createDevToken(deps.config, userId), userId });
+    const roleRaw = typeof req.body?.role === 'string' ? req.body.role : 'owner';
+    const role =
+      roleRaw === 'admin' || roleRaw === 'member' || roleRaw === 'viewer'
+        ? roleRaw
+        : 'owner';
+    res.json({ token: createDevToken(deps.config, userId, role), userId, role });
+  });
+
+  router.post('/crypto/encrypt', requireAuth, (req, res) => {
+    const plaintext = typeof req.body?.plaintext === 'string' ? req.body.plaintext : '';
+    if (!plaintext) {
+      res.status(400).json({ error: 'plaintext required' });
+      return;
+    }
+    res.json({ ciphertext: encryptString(plaintext, deps.config.auth.encryptionKey) });
+  });
+
+  router.post('/crypto/decrypt', requireAuth, (req, res) => {
+    const ciphertext = typeof req.body?.ciphertext === 'string' ? req.body.ciphertext : '';
+    if (!ciphertext) {
+      res.status(400).json({ error: 'ciphertext required' });
+      return;
+    }
+    try {
+      res.json({ plaintext: decryptString(ciphertext, deps.config.auth.encryptionKey) });
+    } catch (error: unknown) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   });
 
   router.get('/commands', requireAuth, (_req, res) => {
@@ -208,6 +265,11 @@ export function createApiRouter(deps: {
     const userId = req.user?.userId;
     if (!userId) {
       res.status(401).json({ error: 'UNAUTHORIZED' });
+      return;
+    }
+
+    if (!canExecuteCommand(req.user?.role, parsed.data.command)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Role cannot execute this command' });
       return;
     }
 

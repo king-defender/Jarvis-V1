@@ -19,6 +19,7 @@ export const SystemConfigSchema = z.object({
   auth: z.object({
     jwtSecret: z.string().min(8).default('dev-jwt-secret-change-me'),
     apiKeyHash: z.string().optional(),
+    encryptionKey: z.string().min(8).default('dev-encryption-key-change-me'),
   }),
   database: z.object({
     mongoUrl: z.string().default('mongodb://127.0.0.1:27017'),
@@ -43,13 +44,25 @@ export const SystemConfigSchema = z.object({
     pageLoadStrategy: z
       .enum(['networkidle', 'load', 'domcontentloaded'])
       .default('networkidle'),
+    engine: z.enum(['auto', 'playwright', 'fetch']).default('auto'),
   }),
   ai: z.object({
-    defaultModel: z.string().default('claude-3-5-sonnet'),
-    fallbackModel: z.string().default('gemini-1-5-flash'),
+    defaultModel: z.string().default('claude-3-5-sonnet-20241022'),
+    fallbackModel: z.string().default('gemini-1.5-flash'),
     localModel: z.string().default('llama3'),
     monthlyLimitUsd: z.coerce.number().default(50),
     providerKey: z.string().optional(),
+    anthropicApiKey: z.string().optional(),
+    geminiApiKey: z.string().optional(),
+    ollamaBaseUrl: z.string().optional(),
+  }),
+  email: z.object({
+    smtpHost: z.string().optional(),
+    smtpPort: z.coerce.number().int().default(587),
+    smtpSecure: booleanFromEnv.default(false),
+    smtpUser: z.string().optional(),
+    smtpPass: z.string().optional(),
+    fromAddress: z.string().default('commandos@localhost'),
   }),
   github: z.object({
     token: z.string().optional(),
@@ -80,6 +93,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SystemConfig {
     auth: {
       jwtSecret: env.JWT_SECRET,
       apiKeyHash: env.API_KEY_HASH || undefined,
+      encryptionKey: env.ENCRYPTION_KEY || env.JWT_SECRET,
     },
     database: {
       mongoUrl: env.MONGO_URL,
@@ -100,6 +114,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SystemConfig {
     browser: {
       headless: env.BROWSER_HEADLESS,
       timeoutMs: env.BROWSER_TIMEOUT_MS,
+      engine: env.BROWSER_ENGINE,
     },
     ai: {
       defaultModel: env.AI_DEFAULT_MODEL,
@@ -107,6 +122,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SystemConfig {
       localModel: env.AI_LOCAL_MODEL,
       monthlyLimitUsd: env.AI_MONTHLY_LIMIT_USD,
       providerKey: env.AI_PROVIDER_KEY || undefined,
+      anthropicApiKey: env.ANTHROPIC_API_KEY || undefined,
+      geminiApiKey: env.GEMINI_API_KEY || undefined,
+      ollamaBaseUrl: env.OLLAMA_BASE_URL || undefined,
+    },
+    email: {
+      smtpHost: env.SMTP_HOST || undefined,
+      smtpPort: env.SMTP_PORT,
+      smtpSecure: env.SMTP_SECURE,
+      smtpUser: env.SMTP_USER || undefined,
+      smtpPass: env.SMTP_PASS || undefined,
+      fromAddress: env.SMTP_FROM,
     },
     github: {
       token: env.GITHUB_TOKEN || undefined,

@@ -30,6 +30,7 @@ import type { CommandRegistration } from '../../../shared/types/command.types.js
 
 const DecideSchema = z.object({
   data: z.record(z.unknown()),
+  execute: z.boolean().default(true),
   policy: z.object({
     id: z.string().min(1),
     name: z.string().min(1),
@@ -57,11 +58,13 @@ const DecideSchema = z.object({
       type: z.enum(['DISPATCH_COMMAND', 'TRIGGER_APPROVAL', 'SKIP', 'NOTIFY']),
       command: z.string().optional(),
       message: z.string().optional(),
+      channel: z.enum(['slack', 'email']).optional(),
     }),
     onMiss: z.object({
       type: z.enum(['DISPATCH_COMMAND', 'TRIGGER_APPROVAL', 'SKIP', 'NOTIFY']),
       command: z.string().optional(),
       message: z.string().optional(),
+      channel: z.enum(['slack', 'email']).optional(),
     }),
   }),
 });
@@ -75,7 +78,10 @@ export interface PlatformDeps {
   connectors: ConnectorRegistry;
   eventBus: ISystemEventBus;
   decisionEngine: DecisionEngine;
+  approvalService: import('../../../orchestration/approval/approval.service.js').ApprovalService;
+  runCommand: (directive: import('../../../shared/types/command.types.js').SystemCommandDirective) => Promise<unknown>;
   slackWebhookUrl?: string;
+  execute?: boolean;
 }
 
 export function getPlatformCommandRegistrations(deps: PlatformDeps): CommandRegistration[] {
@@ -83,19 +89,26 @@ export function getPlatformCommandRegistrations(deps: PlatformDeps): CommandRegi
     {
       command: 'platform.decide',
       schema: DecideSchema,
-      handler: async (payload: z.infer<typeof DecideSchema>) => {
-        const result = deps.decisionEngine.decide(
+      handler: async (payload: z.infer<typeof DecideSchema>, context) => {
+        if (!payload.execute) {
+          const result = deps.decisionEngine.decide(
+            payload.data,
+            payload.policy as DecisionPolicy,
+          );
+          return result;
+        }
+        return deps.decisionEngine.decideAndExecute(
           payload.data,
           payload.policy as DecisionPolicy,
+          {
+            userId: context.userId,
+            storage: deps.storage,
+            approvalService: deps.approvalService,
+            notifications: deps.notifications,
+            runCommand: deps.runCommand,
+            ...(deps.slackWebhookUrl ? { slackWebhookUrl: deps.slackWebhookUrl } : {}),
+          },
         );
-        await deps.storage.collection('decision_log').insertOne({
-          id: randomUUID(),
-          policy_id: payload.policy.id,
-          matched: result.matched,
-          action: result.action,
-          created_at: new Date().toISOString(),
-        });
-        return result;
       },
     },
     {

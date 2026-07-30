@@ -1,5 +1,10 @@
 import type { Db } from 'mongodb';
 import { RuleEngineEvaluator, type RuleGroup } from '../../evaluation/rules/rule-engine.evaluator.js';
+import {
+  backoffDelayMs,
+  classifyError,
+  shouldRetry,
+} from '../recovery/recovery.js';
 import type {
   RunCommandFn,
   WorkflowContext,
@@ -74,6 +79,7 @@ export class WorkflowCoordinator {
       } catch (err: unknown) {
         attempts += 1;
         const error = err as { status?: string; partialOutput?: unknown; message?: string };
+        const errorClass = classifyError(err);
 
         if (error.status === 'INTELLIGENCE_DEGRADED') {
           this.context.status = 'INTELLIGENCE_DEGRADED';
@@ -82,13 +88,24 @@ export class WorkflowCoordinator {
           return true;
         }
 
-        if (attempts > step.retryAttempts) {
+        if (!shouldRetry(errorClass) || attempts > step.retryAttempts) {
           this.context.status = 'FAILED';
+          await this.db.collection('dead_letter_queue').insertOne({
+            id: crypto.randomUUID(),
+            workflow_id: this.context.workflowId,
+            step: step.name,
+            command: step.command,
+            error_class: errorClass,
+            error_message: error.message ?? String(err),
+            created_at: new Date().toISOString(),
+          });
           throw new Error(
             `Workflow execution aborted: Step "${step.name}" failed permanently.` +
               (error.message ? ` ${error.message}` : ''),
           );
         }
+
+        await new Promise((resolve) => setTimeout(resolve, backoffDelayMs(attempts - 1)));
       }
     }
 

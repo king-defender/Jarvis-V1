@@ -2,18 +2,44 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Jarvis-V1 / CommandOS API",
-    "version": "0.1.0"
+    "version": "0.2.0",
+    "description": "Deterministic command, workflow, decision, and automation platform"
   },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  },
+  "security": [{ "bearerAuth": [] }],
   "paths": {
     "/api/health": {
-      "get": { "summary": "Health check", "responses": { "200": { "description": "OK" } } }
+      "get": { "summary": "Health check", "security": [], "responses": { "200": { "description": "OK" } } }
+    },
+    "/api/auth/dev-token": {
+      "post": { "summary": "Issue development JWT", "security": [], "responses": { "200": { "description": "Token" } } }
+    },
+    "/api/commands": {
+      "get": { "summary": "List registered commands" }
     },
     "/api/command": {
-      "post": { "summary": "Execute command", "responses": { "200": { "description": "Completed" }, "202": { "description": "Pending approval" } } }
+      "post": { "summary": "Execute command", "responses": { "200": { "description": "Completed" }, "202": { "description": "Pending approval" }, "403": { "description": "RBAC forbidden" } } }
     },
     "/api/workflows": {
       "get": { "summary": "List workflows" },
       "post": { "summary": "Start workflow" }
+    },
+    "/api/workflows/{id}": {
+      "get": { "summary": "Get workflow by id" }
+    },
+    "/api/workflows/{id}/resume": {
+      "post": { "summary": "Resume workflow" }
+    },
+    "/api/workflows/{id}/cancel": {
+      "post": { "summary": "Cancel workflow" }
     },
     "/api/rules": {
       "get": { "summary": "List rule groups" },
@@ -22,15 +48,25 @@
     "/api/approvals": {
       "get": { "summary": "List pending approvals" }
     },
+    "/api/approvals/{id}/resolve": {
+      "post": { "summary": "Approve or reject pending command" }
+    },
     "/api/tenants": {
       "get": { "summary": "List tenants" },
       "post": { "summary": "Create tenant" }
     },
+    "/api/tenants/{tenantId}/users": {
+      "get": { "summary": "List tenant users" },
+      "post": { "summary": "Upsert tenant user" }
+    },
     "/api/widgets": {
       "get": { "summary": "List desktop widgets" }
     },
+    "/api/widgets/{id}/data": {
+      "get": { "summary": "Widget data payload" }
+    },
     "/api/metrics": {
-      "get": { "summary": "Metrics snapshot" }
+      "get": { "summary": "Metrics and recent traces" }
     },
     "/api/plugins": {
       "get": { "summary": "List loaded plugins" }
@@ -38,14 +74,23 @@
     "/api/connectors": {
       "get": { "summary": "List connectors" }
     },
+    "/api/connectors/{id}/test": {
+      "post": { "summary": "Test connector health" }
+    },
     "/api/decision/evaluate": {
-      "post": { "summary": "Evaluate a decision policy" }
+      "post": { "summary": "Evaluate and optionally execute a decision policy" }
+    },
+    "/api/crypto/encrypt": {
+      "post": { "summary": "Encrypt plaintext with AES-256-GCM" }
+    },
+    "/api/crypto/decrypt": {
+      "post": { "summary": "Decrypt AES-256-GCM ciphertext" }
     },
     "/api/versions/workflows": {
       "get": { "summary": "List versioned workflow artifacts" }
     },
     "/api/openapi.json": {
-      "get": { "summary": "OpenAPI document" }
+      "get": { "summary": "OpenAPI document", "security": [] }
     }
   }
 }

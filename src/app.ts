@@ -105,12 +105,13 @@ async function main(): Promise<void> {
   await database.connect();
   await database.migrate();
   await cache.connect();
+  await browser.init();
 
   const storage = new StorageService(database.getDb(), database.getClient());
   const approvalService = new ApprovalService(storage, eventBus);
   const tenantService = new TenantService(storage);
   const filesystem = new FilesystemService(config.app.baseDataPath);
-  const email = new EmailService(storage, log);
+  const email = new EmailService(config, storage, log);
   const notifications = new NotificationService(storage, log);
   const decisionEngine = new DecisionEngine();
   const metrics = new MetricsService();
@@ -123,6 +124,29 @@ async function main(): Promise<void> {
     rateLimitWindowMs: 60_000,
   });
   connectors.register(healthConnector);
+
+  if (config.github.token) {
+    const { GitHubConnector } = await import('./infrastructure/connectors/providers.js');
+    const gh = new GitHubConnector();
+    await gh.initialize({
+      baseUrl: 'https://api.github.com',
+      oauthToken: config.github.token,
+      rateLimitLimit: 30,
+      rateLimitWindowMs: 60_000,
+    });
+    connectors.register(gh);
+  }
+
+  if (config.integrations.slackWebhookUrl) {
+    const { SlackWebhookConnector } = await import('./infrastructure/connectors/providers.js');
+    const slack = new SlackWebhookConnector();
+    await slack.initialize({
+      baseUrl: config.integrations.slackWebhookUrl,
+      rateLimitLimit: 20,
+      rateLimitWindowMs: 60_000,
+    });
+    connectors.register(slack);
+  }
 
   const pluginLoader = new PluginLoader(path.resolve('plugins'), log);
   await pluginLoader.loadAll();
@@ -207,6 +231,8 @@ async function main(): Promise<void> {
       connectors,
       eventBus,
       decisionEngine,
+      approvalService,
+      runCommand,
       ...(config.integrations.slackWebhookUrl
         ? { slackWebhookUrl: config.integrations.slackWebhookUrl }
         : {}),
@@ -298,6 +324,8 @@ async function main(): Promise<void> {
       connectors,
       decisionEngine,
       workflowVersions,
+      storage,
+      notifications,
     }),
   );
 

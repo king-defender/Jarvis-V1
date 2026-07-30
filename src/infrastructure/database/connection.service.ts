@@ -33,6 +33,7 @@ const COLLECTIONS = [
   'audit_log',
   'decision_log',
   'interview_prep',
+  'dead_letter_queue',
 ] as const;
 
 export class DatabaseService {

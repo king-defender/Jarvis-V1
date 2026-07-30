@@ -86,28 +86,30 @@ export function getBrowserModuleCommandRegistrations(deps: {
       command: 'browser.screenshot',
       schema: ScreenshotSchema,
       handler: async (payload: z.infer<typeof ScreenshotSchema>) => {
-        const page = await deps.browser.fetchPage(payload.url);
         const dir = path.resolve(deps.baseDataPath, 'screenshots');
         await fs.mkdir(dir, { recursive: true });
-        const fileName = `${createHash('sha1').update(payload.url).digest('hex').slice(0, 12)}.html`;
+        const fileName = `${createHash('sha1').update(payload.url).digest('hex').slice(0, 12)}.png`;
         const imagePath = path.join(dir, fileName);
-        const html = `<!doctype html><meta charset="utf-8"><title>${page.title}</title><pre>${page.text.slice(0, 20_000)}</pre>`;
-        await fs.writeFile(imagePath, html, 'utf8');
+        const shot = await deps.browser.screenshot(
+          payload.url,
+          imagePath,
+          payload.selector,
+        );
 
         deps.eventBus.publish(
           createSystemEvent({
             transactionId: randomUUID(),
             eventName: 'browser.screenshot_taken',
-            payload: { url: payload.url, imagePath },
+            payload: { url: payload.url, imagePath: shot.imagePath, mode: shot.mode },
             producer: 'BrowserModule',
           }),
         );
 
         return {
-          imagePath,
-          width: 1280,
-          height: 720,
-          note: 'HTML snapshot (Playwright screenshot upgrade path)',
+          imagePath: shot.imagePath,
+          width: shot.width,
+          height: shot.height,
+          mode: shot.mode,
         };
       },
     },

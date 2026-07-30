@@ -2,9 +2,12 @@ import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import type { SystemConfig } from '../../config.js';
 
+export type AuthRole = 'owner' | 'admin' | 'member' | 'viewer';
+
 export interface AuthUser {
   userId: string;
   subject: string;
+  role: AuthRole;
 }
 
 declare global {
@@ -40,9 +43,16 @@ export function createAuthMiddleware(config: SystemConfig) {
         return;
       }
 
+      const roleRaw = typeof payload.role === 'string' ? payload.role : 'member';
+      const role: AuthRole =
+        roleRaw === 'owner' || roleRaw === 'admin' || roleRaw === 'viewer'
+          ? roleRaw
+          : 'member';
+
       req.user = {
         userId,
         subject: userId,
+        role,
       };
       next();
     } catch {
@@ -54,6 +64,10 @@ export function createAuthMiddleware(config: SystemConfig) {
   };
 }
 
-export function createDevToken(config: SystemConfig, userId = 'local-user'): string {
-  return jwt.sign({ sub: userId }, config.auth.jwtSecret, { expiresIn: '7d' });
+export function createDevToken(
+  config: SystemConfig,
+  userId = 'local-user',
+  role: AuthRole = 'owner',
+): string {
+  return jwt.sign({ sub: userId, role }, config.auth.jwtSecret, { expiresIn: '7d' });
 }
