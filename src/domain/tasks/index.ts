@@ -59,6 +59,25 @@ export function parsePdfTextTask(raw: string): string {
   return raw.replace(/\u0000/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+export async function parsePdfFileTask(
+  filePath: string,
+): Promise<{ text: string; pages: number; engine: string }> {
+  const fs = await import('node:fs/promises');
+  const { PDFParse } = await import('pdf-parse');
+  const buffer = await fs.readFile(filePath);
+  const parser = new PDFParse({ data: new Uint8Array(buffer) });
+  try {
+    const parsed = await parser.getText();
+    return {
+      text: parsePdfTextTask(parsed.text || ''),
+      pages: parsed.total ?? 0,
+      engine: 'pdf-parse',
+    };
+  } finally {
+    await parser.destroy();
+  }
+}
+
 export async function callLlmTask(
   complete: (input: { prompt: string; systemPrompt?: string }) => Promise<{ text: string }>,
   prompt: string,
@@ -117,11 +136,11 @@ export async function sendEmailTask(
 }
 
 export async function screenshotTask(
-  writeFile: (path: string, content: string) => Promise<void>,
+  screenshot: (url: string, outputPath: string, selector?: string) => Promise<{ imagePath: string }>,
   url: string,
   outputPath: string,
-  pageText: string,
+  selector?: string,
 ): Promise<string> {
-  await writeFile(outputPath, `<html><body><h1>${url}</h1><pre>${pageText}</pre></body></html>`);
-  return outputPath;
+  const result = await screenshot(url, outputPath, selector);
+  return result.imagePath;
 }

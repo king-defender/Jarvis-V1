@@ -9,6 +9,10 @@ import {
   createSystemEvent,
   type ISystemEventBus,
 } from '../../../infrastructure/services/event-bus.service.js';
+import {
+  coverLetterSkill,
+  resumeOptimizeSkill,
+} from '../../skills/index.js';
 import type { CommandRegistration } from '../../../shared/types/command.types.js';
 
 const SyncProfileSchema = z.object({
@@ -48,24 +52,9 @@ export interface CareerDeps {
   browser: IBrowserService;
   github: IGitHubService;
   eventBus: ISystemEventBus;
-}
-
-function keywordOverlapScore(resumeText: string, jobText: string): number {
-  const tokenize = (value: string) =>
-    new Set(
-      value
-        .toLowerCase()
-        .split(/[^a-z0-9+#.]+/)
-        .filter((t) => t.length > 2),
-    );
-  const resumeTokens = tokenize(resumeText);
-  const jobTokens = tokenize(jobText);
-  if (jobTokens.size === 0) return 0;
-  let hits = 0;
-  for (const token of jobTokens) {
-    if (resumeTokens.has(token)) hits += 1;
-  }
-  return Math.round((hits / jobTokens.size) * 100);
+  modelRouter: import('../../../infrastructure/ai/model-router.service.js').ModelRouterService;
+  prompts: import('../../../infrastructure/ai/prompt-safety-eval.js').PromptLibrary;
+  safety: import('../../../infrastructure/ai/prompt-safety-eval.js').SafetyService;
 }
 
 export function getCareerCommandRegistrations(deps: CareerDeps): CommandRegistration[] {
@@ -273,25 +262,27 @@ export function getCareerCommandRegistrations(deps: CareerDeps): CommandRegistra
 
         const jobText = `${String(job.title)} ${String(job.description)}`;
         const resumeText = String(resumeDoc.text ?? '');
-        const matchScore = keywordOverlapScore(resumeText, jobText);
-
-        const optimizedResumeId = randomUUID();
-        const suggestedBulletPoints = [
-          {
-            section: 'Experience',
-            original: 'Built backend services.',
-            suggested: `Built TypeScript services aligned to ${String(job.title)} requirements.`,
-            reason: 'Mirror job title keywords for ATS overlap',
-          },
-        ];
+        const optimized = await resumeOptimizeSkill({
+          resumeText,
+          jobText,
+          jobTitle: String(job.title ?? 'role'),
+          modelRouter: deps.modelRouter,
+          prompts: deps.prompts,
+          safety: deps.safety,
+        });
+        const matchScore = optimized.matchScore;
+        const suggestedBulletPoints = optimized.suggestedBulletPoints;
 
         const tailored = {
           ...((resumeDoc.data as Record<string, unknown> | undefined) ?? {}),
           targetJobId: payload.jobId,
           matchScore,
           suggestedBulletPoints,
+          modelText: optimized.modelText,
+          degraded: optimized.degraded,
         };
 
+        const optimizedResumeId = randomUUID();
         const now = new Date().toISOString();
         await deps.storage.collection('resumes').insertOne({
           id: optimizedResumeId,
@@ -299,7 +290,7 @@ export function getCareerCommandRegistrations(deps: CareerDeps): CommandRegistra
           parent_resume_id: payload.resumeId,
           job_id: payload.jobId,
           title: `Optimized for ${String(job.title)}`,
-          text: `${resumeText}\n\nTailored for: ${String(job.title)}`,
+          text: `${resumeText}\n\nTailored for: ${String(job.title)}\n\n${optimized.modelText}`,
           data: tailored,
           match_score: matchScore,
           created_at: now,
@@ -322,6 +313,7 @@ export function getCareerCommandRegistrations(deps: CareerDeps): CommandRegistra
             .join('\n'),
           matchScore,
           suggestedBulletPoints,
+          degraded: optimized.degraded,
         };
       },
     },
@@ -342,19 +334,17 @@ export function getCareerCommandRegistrations(deps: CareerDeps): CommandRegistra
 
         const company = String(job.company ?? 'the company');
         const title = String(job.title ?? 'the role');
-        const draftText = [
-          `Dear ${company} Hiring Team,`,
-          '',
-          `I am writing to express my interest in the ${title} position.`,
-          resume
-            ? `My background includes experience relevant to this role, with a focus on building reliable systems.`
-            : `I bring a strong foundation in software engineering and a track record of shipping production systems.`,
-          '',
-          `Tone: ${payload.tone}. I would welcome the opportunity to contribute to ${company}.`,
-          '',
-          'Sincerely,',
-          context.userId,
-        ].join('\n');
+        const letter = await coverLetterSkill({
+          resumeText: String(resume?.text ?? ''),
+          jobText: `${title} ${String(job.description ?? '')}`,
+          company,
+          title,
+          tone: payload.tone,
+          modelRouter: deps.modelRouter,
+          prompts: deps.prompts,
+          safety: deps.safety,
+        });
+        const draftText = letter.draftText;
 
         const coverLetterId = randomUUID();
         const now = new Date().toISOString();
@@ -366,6 +356,7 @@ export function getCareerCommandRegistrations(deps: CareerDeps): CommandRegistra
           draft_text: draftText,
           word_count: draftText.split(/\s+/).length,
           tone: payload.tone,
+          degraded: letter.degraded,
           created_at: now,
           updated_at: now,
         });
@@ -374,6 +365,7 @@ export function getCareerCommandRegistrations(deps: CareerDeps): CommandRegistra
           coverLetterId,
           draftText,
           wordCount: draftText.split(/\s+/).length,
+          degraded: letter.degraded,
         };
       },
     },

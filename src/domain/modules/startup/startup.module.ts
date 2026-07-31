@@ -7,6 +7,11 @@ import {
   createSystemEvent,
   type ISystemEventBus,
 } from '../../../infrastructure/services/event-bus.service.js';
+import { competitorResearchSkill } from '../../skills/index.js';
+import type {
+  PromptLibrary,
+  SafetyService,
+} from '../../../infrastructure/ai/prompt-safety-eval.js';
 import type { CommandRegistration } from '../../../shared/types/command.types.js';
 
 const CompetitorSchema = z.object({
@@ -28,6 +33,8 @@ export function getStartupCommandRegistrations(deps: {
   browser: IBrowserService;
   modelRouter: ModelRouterService;
   eventBus: ISystemEventBus;
+  prompts: PromptLibrary;
+  safety: SafetyService;
 }): CommandRegistration[] {
   return [
     {
@@ -37,13 +44,23 @@ export function getStartupCommandRegistrations(deps: {
         const page = await deps.browser.fetchPage(payload.domainUrl);
         const host = new URL(payload.domainUrl).hostname.replace(/^www\./, '');
         const companyName = page.title || host;
+        const research = await competitorResearchSkill({
+          companyName,
+          url: payload.domainUrl,
+          pageText: page.text || page.html.slice(0, 5000),
+          modelRouter: deps.modelRouter,
+          prompts: deps.prompts,
+          safety: deps.safety,
+        });
         const pricingPlans = [
           { name: 'Starter', price: '$0' },
           { name: 'Pro', price: '$29/mo' },
           { name: 'Enterprise', price: 'Contact sales' },
         ];
-        const keyFeatures = (page.text.match(/\b[A-Z][a-z]+(?:\s[A-Z][a-z]+){0,2}\b/g) ?? [])
-          .slice(0, 8);
+        const keyFeatures =
+          research.keyFeatures.length > 0
+            ? research.keyFeatures
+            : (page.text.match(/\b[A-Z][a-z]+(?:\s[A-Z][a-z]+){0,2}\b/g) ?? []).slice(0, 8);
 
         const now = new Date().toISOString();
         await deps.storage.collection('competitor_profiles').updateOne(
@@ -54,6 +71,7 @@ export function getStartupCommandRegistrations(deps: {
               company_name: companyName,
               raw_pricing_data: pricingPlans,
               key_features: keyFeatures,
+              analysis: research.analysis,
               scraped_at: now,
               updated_at: now,
             },
@@ -70,7 +88,13 @@ export function getStartupCommandRegistrations(deps: {
           }),
         );
 
-        return { companyName, pricingPlans, keyFeatures };
+        return {
+          companyName,
+          pricingPlans,
+          keyFeatures,
+          analysis: research.analysis,
+          degraded: research.degraded,
+        };
       },
     },
     {

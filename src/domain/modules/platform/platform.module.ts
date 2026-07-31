@@ -26,9 +26,15 @@ import {
   matchResumeTask,
   ocrTask,
   parseHtmlTask,
+  parsePdfFileTask,
   parsePdfTextTask,
   extractDomTask,
 } from '../../tasks/index.js';
+import type {
+  PromptLibrary,
+  SafetyService,
+  EvaluationService,
+} from '../../../infrastructure/ai/prompt-safety-eval.js';
 import type { CommandRegistration } from '../../../shared/types/command.types.js';
 
 const DecideSchema = z.object({
@@ -84,6 +90,9 @@ export interface PlatformDeps {
   approvalService: import('../../../orchestration/approval/approval.service.js').ApprovalService;
   runCommand: (directive: import('../../../shared/types/command.types.js').SystemCommandDirective) => Promise<unknown>;
   baseDataPath: string;
+  prompts: PromptLibrary;
+  safety: SafetyService;
+  evaluation: EvaluationService;
   slackWebhookUrl?: string;
   execute?: boolean;
 }
@@ -140,6 +149,20 @@ export function getPlatformCommandRegistrations(deps: PlatformDeps): CommandRegi
       command: 'platform.parse-pdf-text',
       schema: z.object({ raw: z.string().min(1) }),
       handler: async (payload: { raw: string }) => ({ text: parsePdfTextTask(payload.raw) }),
+    },
+    {
+      command: 'platform.parse-pdf',
+      schema: z.object({ filePath: z.string().min(1) }),
+      handler: async (payload: { filePath: string }) => parsePdfFileTask(payload.filePath),
+    },
+    {
+      command: 'platform.evaluate-output',
+      schema: z.object({
+        expected: z.string().min(1),
+        actual: z.string().min(1),
+      }),
+      handler: async (payload: { expected: string; actual: string }) =>
+        deps.evaluation.scoreRelevance(payload),
     },
     {
       command: 'platform.extract-dom',
@@ -331,6 +354,8 @@ export function getPlatformCommandRegistrations(deps: PlatformDeps): CommandRegi
           jobDescription: payload.jobDescription,
           questionsCount: payload.questionsCount,
           modelRouter: deps.modelRouter,
+          prompts: deps.prompts,
+          safety: deps.safety,
         });
         await deps.storage.collection('interview_prep').insertOne({
           id: randomUUID(),

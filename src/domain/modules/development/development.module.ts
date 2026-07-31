@@ -9,6 +9,12 @@ import {
   type ISystemEventBus,
 } from '../../../infrastructure/services/event-bus.service.js';
 import { gitCloneTask } from '../../tasks/index.js';
+import { githubReviewSkill } from '../../skills/index.js';
+import type { ModelRouterService } from '../../../infrastructure/ai/model-router.service.js';
+import type {
+  PromptLibrary,
+  SafetyService,
+} from '../../../infrastructure/ai/prompt-safety-eval.js';
 import type { CommandRegistration } from '../../../shared/types/command.types.js';
 
 const BoilerplateSchema = z.object({
@@ -43,6 +49,9 @@ export function getDevelopmentCommandRegistrations(deps: {
   github: IGitHubService;
   eventBus: ISystemEventBus;
   baseDataPath: string;
+  modelRouter: ModelRouterService;
+  prompts: PromptLibrary;
+  safety: SafetyService;
 }): CommandRegistration[] {
   return [
     {
@@ -107,31 +116,23 @@ export function getDevelopmentCommandRegistrations(deps: {
           diff = '';
         }
 
-        const inlineComments = [];
-        if (/TODO|FIXME/.test(diff)) {
-          inlineComments.push({
-            file: 'unknown',
-            line: 1,
-            comment: 'Found TODO/FIXME markers in the diff. Resolve before merge.',
-          });
-        }
-
-        const status = inlineComments.length > 0 ? 'changes_requested' : 'approved';
-        const reviewSummary =
-          status === 'approved'
-            ? 'No blocking issues detected in available diff.'
-            : 'Changes requested based on heuristic review.';
+        const review = await githubReviewSkill({
+          diff,
+          modelRouter: deps.modelRouter,
+          prompts: deps.prompts,
+          safety: deps.safety,
+        });
 
         deps.eventBus.publish(
           createSystemEvent({
             transactionId: randomUUID(),
             eventName: 'development.pr_reviewed',
-            payload: { status, owner: payload.owner, repo: payload.repo },
+            payload: { status: review.status, owner: payload.owner, repo: payload.repo },
             producer: 'DevelopmentModule',
           }),
         );
 
-        return { status, reviewSummary, inlineComments };
+        return review;
       },
     },
     {

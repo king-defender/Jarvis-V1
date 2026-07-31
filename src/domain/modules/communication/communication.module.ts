@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { ModelRouterService } from '../../../infrastructure/ai/model-router.service.js';
+import type { IEmailService } from '../../../infrastructure/services/email.service.js';
 import type { IStorageService } from '../../../infrastructure/services/storage.service.js';
 import {
   createSystemEvent,
@@ -29,6 +30,7 @@ export function getCommunicationCommandRegistrations(deps: {
   storage: IStorageService;
   modelRouter: ModelRouterService;
   eventBus: ISystemEventBus;
+  email: IEmailService;
   webhookUrl?: string;
 }): CommandRegistration[] {
   return [
@@ -51,12 +53,25 @@ export function getCommunicationCommandRegistrations(deps: {
                 snippet: 'Action needed: review and respond.',
               }));
 
-        const summaries = threads.map((t) => {
+        const joined = threads
+          .map((t) => {
+            const row = t as Record<string, unknown>;
+            return `${String(row.subject ?? '')}: ${String(row.snippet ?? '')}`;
+          })
+          .join('\n');
+
+        const ai = await deps.modelRouter.complete({
+          systemPrompt: 'Summarize email threads into action items.',
+          prompt: joined,
+        });
+
+        const summaries = threads.map((t, i) => {
           const row = t as Record<string, unknown>;
           return {
             threadId: String(row.threadId ?? row.id ?? randomUUID()),
             subject: String(row.subject ?? ''),
             snippet: String(row.snippet ?? ''),
+            aiNote: ai.text.split('\n')[i]?.trim() || ai.text.slice(0, 120),
           };
         });
 
@@ -69,7 +84,12 @@ export function getCommunicationCommandRegistrations(deps: {
           }),
         );
 
-        return { threadsCount: summaries.length, summaries };
+        return {
+          threadsCount: summaries.length,
+          summaries,
+          overview: ai.text.slice(0, 800),
+          degraded: ai.degraded,
+        };
       },
     },
     {
@@ -93,7 +113,7 @@ export function getCommunicationCommandRegistrations(deps: {
           }),
         );
 
-        return { subjectDraft, bodyDraft, modelUsed: ai.modelUsed };
+        return { subjectDraft, bodyDraft, modelUsed: ai.modelUsed, degraded: ai.degraded };
       },
     },
     {
@@ -102,18 +122,34 @@ export function getCommunicationCommandRegistrations(deps: {
       handler: async (payload: z.infer<typeof SendAlertSchema>, context) => {
         const messageId = randomUUID();
         const now = new Date().toISOString();
-        let status: 'sent' | 'failed' = 'sent';
+        let status: 'sent' | 'failed' | 'queued_local' = 'sent';
+        let providerId: string | undefined;
 
-        if (payload.channel === 'slack' && deps.webhookUrl) {
+        if (payload.channel === 'slack') {
+          if (!deps.webhookUrl) {
+            status = 'failed';
+          } else {
+            try {
+              const response = await fetch(deps.webhookUrl, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  text: `*${payload.subject}*\n${payload.message}\n→ ${payload.recipient}`,
+                }),
+              });
+              if (!response.ok) status = 'failed';
+            } catch {
+              status = 'failed';
+            }
+          }
+        } else {
           try {
-            const response = await fetch(deps.webhookUrl, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                text: `*${payload.subject}*\n${payload.message}\n→ ${payload.recipient}`,
-              }),
-            });
-            if (!response.ok) status = 'failed';
+            providerId = await deps.email.sendMail(
+              payload.recipient,
+              payload.subject,
+              `<p>${payload.message}</p>`,
+            );
+            status = 'sent';
           } catch {
             status = 'failed';
           }
@@ -127,6 +163,7 @@ export function getCommunicationCommandRegistrations(deps: {
           subject: payload.subject,
           message: payload.message,
           status,
+          provider_id: providerId ?? null,
           sent_at: now,
         });
 
@@ -139,7 +176,7 @@ export function getCommunicationCommandRegistrations(deps: {
           }),
         );
 
-        return { status, messageId };
+        return { status, messageId, providerId };
       },
     },
   ];

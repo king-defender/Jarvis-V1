@@ -11,6 +11,7 @@
     "build:web": "vite build",
     "start": "node dist/src/app.js",
     "migrate": "tsx scripts/migrate.ts",
+    "backup": "tsx scripts/backup.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -27,6 +28,7 @@
     "mongodb": "^6.12.0",
     "node-cron": "^3.0.3",
     "nodemailer": "^9.0.3",
+    "pdf-parse": "^2.4.5",
     "pino": "^9.6.0",
     "playwright": "^1.62.1",
     "simple-git": "^3.36.0",
@@ -39,6 +41,7 @@
     "@types/node": "^22.10.5",
     "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^8.0.1",
+    "@types/pdf-parse": "^1.1.5",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^4.7.0",

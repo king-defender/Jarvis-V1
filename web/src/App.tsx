@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 
+type Page = 'commands' | 'workflows' | 'rules' | 'decisions' | 'approvals' | 'platform';
+
 type Summary = {
   commands: string[];
   workflows: string[];
@@ -27,7 +29,17 @@ const DEFAULT_DECISION = `{
   }
 }`;
 
+const PAGES: Array<{ id: Page; label: string }> = [
+  { id: 'commands', label: 'Commands' },
+  { id: 'workflows', label: 'Workflows' },
+  { id: 'rules', label: 'Rules' },
+  { id: 'decisions', label: 'Decisions' },
+  { id: 'approvals', label: 'Approvals' },
+  { id: 'platform', label: 'Platform' },
+];
+
 export function App() {
+  const [page, setPage] = useState<Page>('commands');
   const [token, setToken] = useState('');
   const [health, setHealth] = useState('offline');
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -45,7 +57,7 @@ export function App() {
   const [error, setError] = useState('');
 
   const refresh = useCallback(async (authToken: string) => {
-    const healthRes = await fetch('/api/health').then((r) => r.json()) as {
+    const healthRes = (await fetch('/api/health').then((r) => r.json())) as {
       checks: { database: string; cache: string };
     };
     setHealth(`db:${healthRes.checks.database} cache:${healthRes.checks.cache}`);
@@ -168,118 +180,142 @@ export function App() {
     <>
       <header>
         <h1>Jarvis-V1</h1>
-        <p className="sub">React CommandOS dashboard — commands, workflows, rules, decisions</p>
+        <p className="sub">React CommandOS control plane</p>
         <div className="row">
           <button type="button" onClick={() => void connect()}>
-            Connect (dev token)
+            Connect
           </button>
           <span className={`status ${token ? 'ok' : 'warn'}`}>{health}</span>
         </div>
+        <nav className="row" style={{ marginTop: '0.75rem' }}>
+          {PAGES.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={page === p.id ? undefined : 'ghost'}
+              onClick={() => setPage(p.id)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </nav>
         {error ? <div className="error">{error}</div> : null}
       </header>
       <main>
-        <section>
-          <h2>Run Command</h2>
-          <select value={command} onChange={(e) => setCommand(e.target.value)}>
-            {(summary?.commands ?? []).map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-          <textarea value={payload} onChange={(e) => setPayload(e.target.value)} />
-          <div className="row">
-            <button type="button" onClick={() => void runCommand()} disabled={!token}>
-              Execute
-            </button>
-          </div>
-          <pre>{cmdOut}</pre>
-        </section>
-
-        <section>
-          <h2>Workflows</h2>
-          <ul>
-            {(summary?.workflows ?? []).map((w) => (
-              <li key={w}>{w}</li>
-            ))}
-          </ul>
-          <div className="row">
-            <select value={workflow} onChange={(e) => setWorkflow(e.target.value)}>
-              {(summary?.workflows ?? []).map((w) => (
-                <option key={w} value={w}>
-                  {w}
+        {page === 'commands' && (
+          <section>
+            <h2>Commands</h2>
+            <select value={command} onChange={(e) => setCommand(e.target.value)}>
+              {(summary?.commands ?? []).map((c) => (
+                <option key={c} value={c}>
+                  {c}
                 </option>
               ))}
             </select>
-            <button type="button" onClick={() => void runWorkflow()} disabled={!token}>
-              Run
-            </button>
-          </div>
-        </section>
+            <textarea value={payload} onChange={(e) => setPayload(e.target.value)} />
+            <div className="row">
+              <button type="button" onClick={() => void runCommand()} disabled={!token}>
+                Execute
+              </button>
+            </div>
+            <pre>{cmdOut}</pre>
+          </section>
+        )}
 
-        <section>
-          <h2>Rule Editor</h2>
-          <input
-            type="text"
-            value={ruleName}
-            onChange={(e) => setRuleName(e.target.value)}
-            placeholder="Rule name"
-          />
-          <textarea value={ruleJson} onChange={(e) => setRuleJson(e.target.value)} />
-          <div className="row">
-            <button type="button" onClick={() => void saveRule()} disabled={!token}>
-              Save rule
-            </button>
-          </div>
-          <ul>
-            {rules.map((r) => (
-              <li key={r.name}>
-                {r.name} ({r.logical_operator ?? 'AND'})
-              </li>
-            ))}
-          </ul>
-        </section>
+        {page === 'workflows' && (
+          <section>
+            <h2>Workflows</h2>
+            <ul>
+              {(summary?.workflows ?? []).map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+            <div className="row">
+              <select value={workflow} onChange={(e) => setWorkflow(e.target.value)}>
+                {(summary?.workflows ?? []).map((w) => (
+                  <option key={w} value={w}>
+                    {w}
+                  </option>
+                ))}
+              </select>
+              <button type="button" onClick={() => void runWorkflow()} disabled={!token}>
+                Run
+              </button>
+            </div>
+            <pre>{cmdOut}</pre>
+          </section>
+        )}
 
-        <section>
-          <h2>Decision Tester</h2>
-          <textarea value={decisionJson} onChange={(e) => setDecisionJson(e.target.value)} />
-          <div className="row">
-            <button type="button" onClick={() => void runDecision()} disabled={!token}>
-              Evaluate
-            </button>
-          </div>
-          <pre>{decisionOut}</pre>
-        </section>
-
-        <section>
-          <h2>Approvals</h2>
-          <ul>
-            {(summary?.approvals ?? []).length === 0 ? (
-              <li>None pending</li>
-            ) : (
-              (summary?.approvals ?? []).map((a) => (
-                <li key={a.id}>
-                  {a.command}{' '}
-                  <button type="button" className="ghost" onClick={() => void approve(a.id)}>
-                    Approve
-                  </button>
+        {page === 'rules' && (
+          <section>
+            <h2>Rule Editor</h2>
+            <input
+              type="text"
+              value={ruleName}
+              onChange={(e) => setRuleName(e.target.value)}
+              placeholder="Rule name"
+            />
+            <textarea value={ruleJson} onChange={(e) => setRuleJson(e.target.value)} />
+            <div className="row">
+              <button type="button" onClick={() => void saveRule()} disabled={!token}>
+                Save rule
+              </button>
+            </div>
+            <ul>
+              {rules.map((r) => (
+                <li key={r.name}>
+                  {r.name} ({r.logical_operator ?? 'AND'})
                 </li>
-              ))
-            )}
-          </ul>
-        </section>
+              ))}
+            </ul>
+          </section>
+        )}
 
-        <section>
-          <h2>Platform</h2>
-          <ul>
-            <li>
-              plugins:{' '}
-              {(summary?.plugins ?? []).map((p) => p.id).join(', ') || 'none'}
-            </li>
-            <li>connectors: {(summary?.connectors ?? []).join(', ') || 'none'}</li>
-          </ul>
-          <pre>{JSON.stringify(summary?.metrics ?? {}, null, 2)}</pre>
-        </section>
+        {page === 'decisions' && (
+          <section>
+            <h2>Decision Tester</h2>
+            <textarea value={decisionJson} onChange={(e) => setDecisionJson(e.target.value)} />
+            <div className="row">
+              <button type="button" onClick={() => void runDecision()} disabled={!token}>
+                Evaluate
+              </button>
+            </div>
+            <pre>{decisionOut}</pre>
+          </section>
+        )}
+
+        {page === 'approvals' && (
+          <section>
+            <h2>Approvals</h2>
+            <ul>
+              {(summary?.approvals ?? []).length === 0 ? (
+                <li>None pending</li>
+              ) : (
+                (summary?.approvals ?? []).map((a) => (
+                  <li key={a.id}>
+                    {a.command}{' '}
+                    <button type="button" className="ghost" onClick={() => void approve(a.id)}>
+                      Approve
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          </section>
+        )}
+
+        {page === 'platform' && (
+          <section>
+            <h2>Platform</h2>
+            <ul>
+              <li>
+                plugins: {(summary?.plugins ?? []).map((p) => p.id).join(', ') || 'none'}
+              </li>
+              <li>connectors: {(summary?.connectors ?? []).join(', ') || 'none'}</li>
+            </ul>
+            <pre>{JSON.stringify(summary?.metrics ?? {}, null, 2)}</pre>
+          </section>
+        )}
       </main>
     </>
   );

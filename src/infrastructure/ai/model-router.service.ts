@@ -68,6 +68,9 @@ export class ModelRouterService {
       }
     }
 
+    this.log.warn('All AI providers failed or unavailable; offline fallback', {
+      attemptedTiers: tiers.map((t) => t.name),
+    });
     return this.offlineFallback(request);
   }
 

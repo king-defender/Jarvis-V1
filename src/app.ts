@@ -19,6 +19,11 @@ import { getStartupCommandRegistrations } from './domain/modules/startup/startup
 import { getDemoWorkflowDefinition } from './domain/modules/system/demo.workflow.js';
 import { getSystemCommandRegistrations } from './domain/modules/system/system.module.js';
 import { DecisionEngine } from './evaluation/decision/decision-engine.js';
+import {
+  EvaluationService,
+  PromptLibrary,
+  SafetyService,
+} from './infrastructure/ai/prompt-safety-eval.js';
 import { ModelRouterService } from './infrastructure/ai/model-router.service.js';
 import { CacheService } from './infrastructure/cache/redis.service.js';
 import {
@@ -101,6 +106,9 @@ async function main(): Promise<void> {
   const search = new SearchService(log, config.search.apiUrl);
   const github = new GitHubService(config, log);
   const modelRouter = new ModelRouterService(config, log);
+  const prompts = new PromptLibrary();
+  const safety = new SafetyService();
+  const evaluation = new EvaluationService(modelRouter);
 
   await database.connect();
   await database.migrate();
@@ -191,20 +199,40 @@ async function main(): Promise<void> {
 
   const registrations = [
     ...getSystemCommandRegistrations(),
-    ...getCareerCommandRegistrations({ storage, search, browser, github, eventBus }),
+    ...getCareerCommandRegistrations({
+      storage,
+      search,
+      browser,
+      github,
+      eventBus,
+      modelRouter,
+      prompts,
+      safety,
+    }),
     ...getDevelopmentCommandRegistrations({
       storage,
       github,
       eventBus,
       baseDataPath: config.app.baseDataPath,
+      modelRouter,
+      prompts,
+      safety,
     }),
-    ...getStartupCommandRegistrations({ storage, browser, modelRouter, eventBus }),
+    ...getStartupCommandRegistrations({
+      storage,
+      browser,
+      modelRouter,
+      eventBus,
+      prompts,
+      safety,
+    }),
     ...getLearningCommandRegistrations({ storage, modelRouter, eventBus }),
     ...getFinanceCommandRegistrations({ storage, eventBus }),
     ...getCommunicationCommandRegistrations({
       storage,
       modelRouter,
       eventBus,
+      email,
       ...(config.integrations.slackWebhookUrl
         ? { webhookUrl: config.integrations.slackWebhookUrl }
         : {}),
@@ -234,6 +262,9 @@ async function main(): Promise<void> {
       approvalService,
       runCommand,
       baseDataPath: config.app.baseDataPath,
+      prompts,
+      safety,
+      evaluation,
       ...(config.integrations.slackWebhookUrl
         ? { slackWebhookUrl: config.integrations.slackWebhookUrl }
         : {}),
