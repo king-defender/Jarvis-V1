@@ -47,6 +47,7 @@ export const SystemConfigSchema = z.object({
     engine: z.enum(['auto', 'playwright', 'fetch']).default('auto'),
   }),
   ai: z.object({
+    mode: z.enum(['offline', 'hybrid']).default('offline'),
     defaultModel: z.string().default('claude-3-5-sonnet-20241022'),
     fallbackModel: z.string().default('gemini-1.5-flash'),
     localModel: z.string().default('llama3'),
@@ -117,6 +118,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SystemConfig {
       engine: env.BROWSER_ENGINE,
     },
     ai: {
+      mode: env.AI_MODE,
       defaultModel: env.AI_DEFAULT_MODEL,
       fallbackModel: env.AI_FALLBACK_MODEL,
       localModel: env.AI_LOCAL_MODEL,

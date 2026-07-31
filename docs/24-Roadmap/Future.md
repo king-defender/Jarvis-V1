@@ -9,11 +9,14 @@
 * API key auth (`x-api-key` + `API_KEY_HASH`), email alerts via EmailService — **done**
 * Multi-page React dashboard navigation — **done**
 
-## Still environment-dependent (not code gaps)
-* Live LLM output needs provider keys / Ollama
-* Real PNG screenshots need Playwright Chromium
-* Outbound SMTP / GitHub / Slack need credentials
-* LinkedIn may hit auth walls without session cookies
+## Offline-first (default)
+* `AI_MODE=offline` (default) — **no API keys required**
+* ModelRouter uses a deterministic composer for drafts (resume, cover letter, interview, PR review, etc.)
+* External providers only if you set `AI_MODE=hybrid` **and** provide keys / Ollama
+
+## Still optional integrations
+* SMTP, GitHub/Slack tokens, Playwright Chromium, LinkedIn cookies
+* Rule editor remains structured JSON (not a drag-and-drop canvas)
 
 ## Intentionally lightweight
 * Rule editor is structured JSON (not a drag-and-drop canvas)
