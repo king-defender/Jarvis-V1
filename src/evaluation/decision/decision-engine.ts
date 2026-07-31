@@ -31,7 +31,7 @@ export interface DecisionResult {
   matched: boolean;
   action: DecisionAction;
   execution?: {
-    status: 'SKIPPED' | 'DISPATCHED' | 'PENDING_APPROVAL' | 'NOTIFIED' | 'FAILED';
+    status: 'SKIPPED' | 'DISPATCHED' | 'PENDING_REVIEW' | 'NOTIFIED' | 'FAILED';
     detail?: unknown;
   };
 }
@@ -111,7 +111,7 @@ export class DecisionEngine {
             userId: deps.userId,
             transactionId: deps.transactionId ?? randomUUID(),
           });
-          return { status: 'PENDING_APPROVAL', detail: approval };
+          return { status: 'PENDING_REVIEW', detail: approval };
         }
         case 'DISPATCH_COMMAND': {
           if (!action.command) {
@@ -128,6 +128,14 @@ export class DecisionEngine {
               bypassCache: false,
             },
           });
+          if (
+            result &&
+            typeof result === 'object' &&
+            'status' in result &&
+            (result as { status?: string }).status === 'PENDING_REVIEW'
+          ) {
+            return { status: 'PENDING_REVIEW', detail: result };
+          }
           return { status: 'DISPATCHED', detail: result };
         }
         default:

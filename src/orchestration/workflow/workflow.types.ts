@@ -20,6 +20,7 @@ export type WorkflowStatus =
   | 'RUNNING'
   | 'COMPLETED'
   | 'FAILED'
+  | 'CANCELLED'
   | 'INTELLIGENCE_DEGRADED'
   | 'PAUSED';
 

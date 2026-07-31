@@ -85,7 +85,7 @@ export class RuleEngineEvaluator {
     });
 
     return group.logicalOperator === 'AND'
-      ? results.every((res) => res === true)
+      ? results.length > 0 && results.every((res) => res === true)
       : results.some((res) => res === true);
   }
 

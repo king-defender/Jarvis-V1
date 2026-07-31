@@ -23,9 +23,19 @@ export function createRequireRoleMiddleware(minRole: Role) {
   };
 }
 
-/** Command namespace ACL: viewers can only run system.ping / health-like reads via API. */
+/** Command namespace ACL for execute surfaces. */
 export function canExecuteCommand(role: Role | undefined, command: string): boolean {
   const r = role ?? 'member';
   if (r === 'owner' || r === 'admin' || r === 'member') return true;
-  return command === 'system.ping' || command.startsWith('platform.classify-error');
+  return command === 'system.ping' || command.startsWith('assistant.');
+}
+
+export function canMutatePlatform(role: Role | undefined): boolean {
+  const r = role ?? 'member';
+  return r === 'owner' || r === 'admin' || r === 'member';
+}
+
+export function canApprove(role: Role | undefined): boolean {
+  const r = role ?? 'member';
+  return r === 'owner' || r === 'admin';
 }

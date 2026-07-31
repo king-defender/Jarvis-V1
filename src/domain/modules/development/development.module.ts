@@ -15,6 +15,7 @@ import type {
   PromptLibrary,
   SafetyService,
 } from '../../../infrastructure/ai/prompt-safety-eval.js';
+import { resolveSandboxedPath } from '../../../infrastructure/services/path-sandbox.js';
 import type { CommandRegistration } from '../../../shared/types/command.types.js';
 
 const BoilerplateSchema = z.object({
@@ -60,6 +61,10 @@ export function getDevelopmentCommandRegistrations(deps: {
       handler: async (payload: z.infer<typeof BoilerplateSchema>) => {
         const started = Date.now();
         const root = path.resolve(deps.baseDataPath, payload.outputPath);
+        if (!root.startsWith(path.resolve(deps.baseDataPath) + path.sep) &&
+            root !== path.resolve(deps.baseDataPath)) {
+          throw new Error('outputPath escapes base data directory');
+        }
         await fs.mkdir(root, { recursive: true });
         const files: Array<{ rel: string; body: string }> = [];
 
@@ -139,7 +144,7 @@ export function getDevelopmentCommandRegistrations(deps: {
       command: 'development.audit-repo',
       schema: AuditRepoSchema,
       handler: async (payload: z.infer<typeof AuditRepoSchema>) => {
-        const root = path.resolve(payload.repoPath);
+        const root = resolveSandboxedPath(deps.baseDataPath, payload.repoPath);
         const vulnerabilities: Array<{ severity: string; description: string; file?: string }> = [];
 
         async function walk(dir: string): Promise<void> {
@@ -206,6 +211,10 @@ export function getDevelopmentCommandRegistrations(deps: {
       schema: CloneRepoSchema,
       handler: async (payload: z.infer<typeof CloneRepoSchema>) => {
         const targetPath = path.resolve(deps.baseDataPath, 'repos', payload.folderName);
+        const reposRoot = path.resolve(deps.baseDataPath, 'repos') + path.sep;
+        if (!targetPath.startsWith(reposRoot) && targetPath !== path.resolve(deps.baseDataPath, 'repos')) {
+          throw new Error('folderName escapes repos directory');
+        }
         const cloneInput: {
           repoUrl: string;
           targetPath: string;

@@ -10,7 +10,7 @@ export function getDemoWorkflowDefinition(): WorkflowDefinition {
         name: 'ping-one',
         command: 'system.ping',
         payloadMapping: {
-          message: '$.context.message',
+          message: '$.context.message?',
         },
         retryAttempts: 1,
       },
@@ -19,7 +19,7 @@ export function getDemoWorkflowDefinition(): WorkflowDefinition {
         name: 'ping-two',
         command: 'system.ping',
         payloadMapping: {
-          message: '$.context.followUp',
+          message: '$.context.followUp?',
         },
         retryAttempts: 1,
       },

@@ -27,7 +27,8 @@ import {
 } from '../../shared/types/command.types.js';
 import { createAuthMiddleware, createDevToken } from '../auth/auth.middleware.js';
 import type { CommandRouter } from '../command-engine/command.router.js';
-import { canExecuteCommand } from '../../infrastructure/security/rbac.js';
+import { interpretUtterance } from '../../domain/modules/assistant/intent-resolver.js';
+import { canApprove, canExecuteCommand, canMutatePlatform } from '../../infrastructure/security/rbac.js';
 import {
   decryptString,
   encryptString,
@@ -183,6 +184,41 @@ export function createApiRouter(deps: {
       res.json(deps.decisionEngine.decide(parsed.data.data, parsed.data.policy));
       return;
     }
+    if (!canMutatePlatform(req.user?.role)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Role cannot execute decisions' });
+      return;
+    }
+
+    const preview = deps.decisionEngine.decide(parsed.data.data, parsed.data.policy);
+    if (
+      preview.action.type === 'DISPATCH_COMMAND' &&
+      preview.action.command &&
+      deps.approvalService.requiresApproval(preview.action.command)
+    ) {
+      const approval = await deps.approvalService.requestApproval({
+        command: preview.action.command,
+        payload: preview.action.payloadTemplate ?? parsed.data.data,
+        userId,
+        transactionId: req.transactionId ?? randomUUID(),
+      });
+      res.status(202).json({
+        ...preview,
+        execution: {
+          status: 'PENDING_REVIEW',
+          detail: approval,
+        },
+      });
+      return;
+    }
+    if (
+      preview.action.type === 'DISPATCH_COMMAND' &&
+      preview.action.command &&
+      !canExecuteCommand(req.user?.role, preview.action.command)
+    ) {
+      res.status(403).json({ error: 'FORBIDDEN' });
+      return;
+    }
+
     const result = await deps.decisionEngine.decideAndExecute(
       parsed.data.data,
       parsed.data.policy,
@@ -209,6 +245,81 @@ export function createApiRouter(deps: {
         isDeprecated: w.isDeprecated ?? false,
       })),
     });
+  });
+
+  router.post('/assistant/interpret', requireAuth, async (req, res) => {
+    const utterance = typeof req.body?.utterance === 'string' ? req.body.utterance : '';
+    const autoExecute = req.body?.autoExecute === true;
+    if (!utterance.trim()) {
+      res.status(400).json({ error: 'utterance required' });
+      return;
+    }
+    const intent = interpretUtterance(utterance);
+    if (!autoExecute || intent.kind === 'help' || intent.kind === 'unknown') {
+      res.json({ intent, executed: false });
+      return;
+    }
+    if (!canMutatePlatform(req.user?.role)) {
+      res.status(403).json({ error: 'FORBIDDEN' });
+      return;
+    }
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ error: 'UNAUTHORIZED' });
+      return;
+    }
+
+    try {
+      if (intent.kind === 'command' && intent.command) {
+        if (!canExecuteCommand(req.user?.role, intent.command)) {
+          res.status(403).json({ error: 'FORBIDDEN' });
+          return;
+        }
+        if (deps.approvalService.requiresApproval(intent.command)) {
+          const approval = await deps.approvalService.requestApproval({
+            command: intent.command,
+            payload: intent.payload,
+            userId,
+            transactionId: req.transactionId ?? randomUUID(),
+          });
+          res.status(202).json({
+            intent,
+            executed: false,
+            status: 'PENDING_REVIEW',
+            approval,
+          });
+          return;
+        }
+        const result = await deps.commandRouter.route({
+          transactionId: req.transactionId ?? randomUUID(),
+          command: intent.command,
+          timestamp: new Date().toISOString(),
+          payload: intent.payload,
+          context: {
+            userId,
+            triggerSource: 'DASHBOARD',
+            bypassCache: false,
+          },
+        });
+        res.json({ intent, executed: true, result });
+        return;
+      }
+      if (intent.kind === 'workflow' && intent.workflow) {
+        const result = await deps.workflowRuntime.start({
+          name: intent.workflow,
+          userId,
+          payload: intent.payload,
+        });
+        res.json({ intent, executed: true, result });
+        return;
+      }
+      res.json({ intent, executed: false });
+    } catch (error: unknown) {
+      res.status(400).json({
+        intent,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   });
 
   router.post('/auth/dev-token', (req, res) => {
@@ -358,6 +469,10 @@ export function createApiRouter(deps: {
       res.status(401).json({ error: 'UNAUTHORIZED' });
       return;
     }
+    if (!canMutatePlatform(req.user?.role)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Role cannot start workflows' });
+      return;
+    }
 
     try {
       const startInput: {
@@ -376,10 +491,13 @@ export function createApiRouter(deps: {
 
       const result = await deps.workflowRuntime.start(startInput);
       const workflow = await deps.workflowRuntime.get(result.workflowId);
-      res.status(parsed.data.async ? 202 : 201).json({
+      // Only advertise async acceptance when the runtime actually queued work.
+      const acceptedAsync = parsed.data.async === true && result.status === 'PENDING';
+      res.status(acceptedAsync ? 202 : 201).json({
         workflowId: result.workflowId,
         status: result.status,
         workflow,
+        async: acceptedAsync,
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -397,6 +515,10 @@ export function createApiRouter(deps: {
   });
 
   router.post('/workflows/:id/resume', requireAuth, async (req, res) => {
+    if (!canMutatePlatform(req.user?.role)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Role cannot resume workflows' });
+      return;
+    }
     const userId = req.user?.userId;
     if (!userId) {
       res.status(401).json({ error: 'UNAUTHORIZED' });
@@ -412,6 +534,10 @@ export function createApiRouter(deps: {
   });
 
   router.post('/workflows/:id/cancel', requireAuth, async (req, res) => {
+    if (!canMutatePlatform(req.user?.role)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Role cannot cancel workflows' });
+      return;
+    }
     try {
       await deps.workflowRuntime.cancel(String(req.params.id));
       res.json({ status: 'CANCELLED' });
@@ -425,33 +551,54 @@ export function createApiRouter(deps: {
   });
 
   router.post('/approvals/:id/resolve', requireAuth, async (req, res) => {
+    if (!canApprove(req.user?.role)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Role cannot resolve approvals' });
+      return;
+    }
     const decision = req.body?.decision === 'REJECTED' ? 'REJECTED' : 'APPROVED';
     try {
-      const approval = await deps.approvalService.resolve(
-        String(req.params.id),
-        decision,
-        typeof req.body?.reason === 'string' ? req.body.reason : undefined,
-      );
-
-      if (decision === 'APPROVED') {
-        const userId = req.user?.userId ?? String(approval.userId);
-        const directive: SystemCommandDirective = {
-          transactionId: randomUUID(),
-          command: String(approval.command),
-          timestamp: new Date().toISOString(),
-          payload: (approval.payload as Record<string, unknown>) ?? {},
-          context: {
-            userId,
-            triggerSource: 'DASHBOARD',
-            bypassCache: false,
-          },
-        };
-        const result = await deps.commandRouter.route(directive);
-        res.json({ approval, execution: { status: 'COMPLETED', result } });
+      if (decision === 'REJECTED') {
+        const approval = await deps.approvalService.resolve(
+          String(req.params.id),
+          'REJECTED',
+          typeof req.body?.reason === 'string' ? req.body.reason : undefined,
+        );
+        res.json({ approval });
         return;
       }
 
-      res.json({ approval });
+      // Atomically claim, execute as requester, then mark APPROVED (release on failure).
+      const pending = await deps.approvalService.claimForExecution(String(req.params.id));
+      if (!pending) {
+        res.status(404).json({ error: 'NOT_FOUND', message: 'Approval not pending' });
+        return;
+      }
+
+      const requesterId = String(pending.userId);
+      const directive: SystemCommandDirective = {
+        transactionId: randomUUID(),
+        command: String(pending.command),
+        timestamp: new Date().toISOString(),
+        payload: (pending.payload as Record<string, unknown>) ?? {},
+        context: {
+          userId: requesterId,
+          triggerSource: 'DASHBOARD',
+          bypassCache: false,
+        },
+      };
+      try {
+        const result = await deps.commandRouter.route(directive);
+        const approval = await deps.approvalService.resolve(
+          String(req.params.id),
+          'APPROVED',
+          typeof req.body?.reason === 'string' ? req.body.reason : undefined,
+        );
+        res.json({ approval, execution: { status: 'COMPLETED', result } });
+      } catch (execError: unknown) {
+        const message = execError instanceof Error ? execError.message : String(execError);
+        await deps.approvalService.releaseClaim(String(req.params.id), message);
+        throw execError;
+      }
     } catch (error: unknown) {
       res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
     }
@@ -469,6 +616,10 @@ export function createApiRouter(deps: {
   });
 
   router.post('/rules', requireAuth, async (req, res) => {
+    if (!canMutatePlatform(req.user?.role)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Role cannot mutate rules' });
+      return;
+    }
     const parsed = RuleGroupBodySchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json({ error: 'VALIDATION_ERROR', message: parsed.error.message });
@@ -526,6 +677,10 @@ export function createApiRouter(deps: {
   });
 
   router.post('/tenants', requireAuth, async (req, res) => {
+    if (!canMutatePlatform(req.user?.role)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Role cannot mutate tenants' });
+      return;
+    }
     const name = typeof req.body?.name === 'string' ? req.body.name : '';
     const slug = typeof req.body?.slug === 'string' ? req.body.slug : '';
     if (!name || !slug) {
@@ -543,6 +698,10 @@ export function createApiRouter(deps: {
   });
 
   router.post('/tenants/:tenantId/users', requireAuth, async (req, res) => {
+    if (!canMutatePlatform(req.user?.role)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Role cannot mutate users' });
+      return;
+    }
     const email = typeof req.body?.email === 'string' ? req.body.email : '';
     const displayName =
       typeof req.body?.displayName === 'string' ? req.body.displayName : email;

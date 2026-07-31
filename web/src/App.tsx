@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 
-type Page = 'commands' | 'workflows' | 'rules' | 'decisions' | 'approvals' | 'platform';
+type Page = 'commands' | 'workflows' | 'rules' | 'decisions' | 'approvals' | 'platform' | 'voice';
 
 type Summary = {
   commands: string[];
@@ -35,6 +35,7 @@ const PAGES: Array<{ id: Page; label: string }> = [
   { id: 'rules', label: 'Rules' },
   { id: 'decisions', label: 'Decisions' },
   { id: 'approvals', label: 'Approvals' },
+  { id: 'voice', label: 'Voice' },
   { id: 'platform', label: 'Platform' },
 ];
 
@@ -55,6 +56,9 @@ export function App() {
   );
   const [workflow, setWorkflow] = useState('system.demo');
   const [error, setError] = useState('');
+  const [voiceText, setVoiceText] = useState('');
+  const [voiceOut, setVoiceOut] = useState('');
+  const [listening, setListening] = useState(false);
 
   const refresh = useCallback(async (authToken: string) => {
     const healthRes = (await fetch('/api/health').then((r) => r.json())) as {
@@ -174,6 +178,66 @@ export function App() {
       body: { decision: 'APPROVED' },
     });
     await refresh(token);
+  };
+
+  const speak = (text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    const utter = new SpeechSynthesisUtterance(text);
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utter);
+  };
+
+  const runVoice = async (utterance: string, autoExecute = true) => {
+    setError('');
+    try {
+      const result = await api<{
+        intent: { spokenReply: string; kind: string; command?: string; workflow?: string };
+        executed?: boolean;
+        result?: unknown;
+        status?: string;
+      }>('/assistant/interpret', {
+        method: 'POST',
+        token,
+        body: { utterance, autoExecute },
+      });
+      setVoiceOut(JSON.stringify(result, null, 2));
+      speak(result.intent.spokenReply);
+      await refresh(token);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const startListening = () => {
+    type Recog = {
+      lang: string;
+      interimResults: boolean;
+      onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+      onerror: (() => void) | null;
+      onend: (() => void) | null;
+      start: () => void;
+    };
+    const W = window as unknown as {
+      SpeechRecognition?: new () => Recog;
+      webkitSpeechRecognition?: new () => Recog;
+    };
+    const Ctor = W.SpeechRecognition || W.webkitSpeechRecognition;
+    if (!Ctor) {
+      setError('Speech recognition is not supported in this browser. Type a command instead.');
+      return;
+    }
+    const recognition = new Ctor();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    setListening(true);
+    recognition.onresult = (event) => {
+      const transcript = event.results[0]?.[0]?.transcript ?? '';
+      setVoiceText(transcript);
+      void runVoice(transcript, true);
+    };
+    recognition.onerror = () => setListening(false);
+    recognition.onend = () => setListening(false);
+    recognition.start();
   };
 
   return (
@@ -301,6 +365,30 @@ export function App() {
                 ))
               )}
             </ul>
+          </section>
+        )}
+
+        {page === 'voice' && (
+          <section>
+            <h2>Voice assistant</h2>
+            <p className="sub">Speak or type. Offline intent resolver — no AI keys required.</p>
+            <textarea
+              value={voiceText}
+              onChange={(e) => setVoiceText(e.target.value)}
+              placeholder='Try: "ping", "run demo workflow", "search jobs for engineer"'
+            />
+            <div className="row">
+              <button type="button" onClick={() => void runVoice(voiceText, true)} disabled={!token || !voiceText.trim()}>
+                Interpret &amp; run
+              </button>
+              <button type="button" className="ghost" onClick={() => void runVoice(voiceText, false)} disabled={!token || !voiceText.trim()}>
+                Interpret only
+              </button>
+              <button type="button" className="ghost" onClick={startListening} disabled={!token || listening}>
+                {listening ? 'Listening…' : 'Listen'}
+              </button>
+            </div>
+            <pre>{voiceOut}</pre>
           </section>
         )}
 

@@ -130,6 +130,14 @@ export class WorkflowRuntime {
   }
 
   async continueQueued(workflowId: string, userId: string): Promise<{ status: WorkflowStatus }> {
+    const doc = await this.db.collection('workflows').findOne({ id: workflowId });
+    if (!doc) {
+      throw new Error(`Workflow not found: ${workflowId}`);
+    }
+    const status = String(doc.status) as WorkflowStatus;
+    if (status === 'CANCELLED' || status === 'COMPLETED' || status === 'FAILED') {
+      return { status };
+    }
     const token = this.cancellations.get(workflowId) ?? { isCancelled: false };
     this.cancellations.set(workflowId, token);
     return this.runWorkflow(workflowId, userId);
@@ -141,13 +149,23 @@ export class WorkflowRuntime {
   }
 
   async cancel(workflowId: string, reason = 'cancelled_by_user'): Promise<void> {
+    const doc = await this.db.collection('workflows').findOne({ id: workflowId });
+    if (!doc) {
+      throw new Error(`Workflow not found: ${workflowId}`);
+    }
+    const status = String(doc.status);
+    if (!['PENDING', 'RUNNING', 'PAUSED'].includes(status)) {
+      throw new Error(`Workflow cannot be cancelled from status: ${status}`);
+    }
     const token = this.cancellations.get(workflowId);
     if (token) {
       token.isCancelled = true;
       token.reason = reason;
+    } else {
+      this.cancellations.set(workflowId, { isCancelled: true, reason });
     }
     await this.updateWorkflow(workflowId, {
-      status: 'FAILED',
+      status: 'CANCELLED',
       error_message: reason,
     });
   }
@@ -218,6 +236,11 @@ export class WorkflowRuntime {
     const accumulatedData =
       (doc.accumulated_data as Record<string, unknown>) ??
       ({ context: doc.input_payload ?? {} } as Record<string, unknown>);
+
+    const existingStatus = String(doc.status);
+    if (existingStatus === 'CANCELLED' || existingStatus === 'COMPLETED' || existingStatus === 'FAILED') {
+      return { status: existingStatus as WorkflowStatus };
+    }
 
     const context = {
       workflowId,
@@ -301,6 +324,17 @@ export class WorkflowRuntime {
       return { status: finalStatus };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
+      if (token?.isCancelled) {
+        await this.updateWorkflow(workflowId, {
+          status: 'CANCELLED',
+          error_message: message,
+          accumulated_data: coordinator.getContext().accumulatedData,
+          current_step_index: currentStepIndex,
+        });
+        this.log.info('Workflow cancelled', { workflowId, error: message });
+        return { status: 'CANCELLED' };
+      }
+
       await this.updateWorkflow(workflowId, {
         status: 'FAILED',
         error_message: message,

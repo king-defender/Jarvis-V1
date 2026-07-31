@@ -179,7 +179,13 @@ export function getPlatformCommandRegistrations(deps: PlatformDeps): CommandRegi
       schema: z.object({
         imagePath: z.string().min(1),
       }),
-      handler: async (payload: { imagePath: string }) => ocrTask(payload.imagePath),
+      handler: async (payload: { imagePath: string }) => {
+        const { resolveSandboxedPath } = await import(
+          '../../../infrastructure/services/path-sandbox.js'
+        );
+        const safe = resolveSandboxedPath(deps.baseDataPath, payload.imagePath);
+        return ocrTask(safe);
+      },
     },
     {
       command: 'platform.git-clone',
@@ -194,11 +200,14 @@ export function getPlatformCommandRegistrations(deps: PlatformDeps): CommandRegi
         branchName?: string;
       }) => {
         const pathMod = await import('node:path');
+        const { resolveSandboxedPath } = await import(
+          '../../../infrastructure/services/path-sandbox.js'
+        );
         const safeRelative = payload.targetPath.replace(/^[/\\]+/, '');
-        const target = pathMod.resolve(deps.baseDataPath, 'repos', safeRelative);
-        if (!target.startsWith(pathMod.resolve(deps.baseDataPath))) {
-          throw new Error('Clone path escapes data directory');
-        }
+        const target = resolveSandboxedPath(
+          deps.baseDataPath,
+          pathMod.join('repos', safeRelative),
+        );
         const cloneInput: {
           repoUrl: string;
           targetPath: string;

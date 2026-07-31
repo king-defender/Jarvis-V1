@@ -15,7 +15,7 @@ export function getCareerJobApplicationWorkflow(): WorkflowDefinition {
         payloadMapping: {
           keywords: '$.context.keywords',
           location: '$.context.location',
-          minSalary: '$.context.minSalary',
+          'minSalary?': '$.context.minSalary',
         },
         retryAttempts: 1,
       },

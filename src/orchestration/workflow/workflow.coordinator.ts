@@ -38,8 +38,19 @@ export class WorkflowCoordinator {
 
   private constructPayload(mapping: Record<string, string>): Record<string, unknown> {
     const payload: Record<string, unknown> = {};
-    for (const [key, pathValue] of Object.entries(mapping)) {
-      payload[key] = this.resolveValue(pathValue, this.context.accumulatedData);
+    for (const [rawKey, rawPath] of Object.entries(mapping)) {
+      const optional = rawKey.endsWith('?') || rawPath.endsWith('?');
+      const key = rawKey.replace(/\?$/, '');
+      const pathValue = rawPath.replace(/\?$/, '');
+      const value = this.resolveValue(pathValue, this.context.accumulatedData);
+      if (pathValue.startsWith('$.') && (value === undefined || value === null)) {
+        if (optional) continue;
+        throw new Error(
+          `Workflow payload mapping failed for "${key}" ← ${pathValue} (value missing). ` +
+            `Earlier step may have returned empty results.`,
+        );
+      }
+      payload[key] = value;
     }
     return payload;
   }

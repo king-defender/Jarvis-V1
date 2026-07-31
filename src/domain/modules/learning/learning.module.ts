@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { z } from 'zod';
 import type { ModelRouterService } from '../../../infrastructure/ai/model-router.service.js';
+import { resolveSandboxedPath } from '../../../infrastructure/services/path-sandbox.js';
 import type { IStorageService } from '../../../infrastructure/services/storage.service.js';
 import {
   createSystemEvent,
@@ -30,6 +31,7 @@ export function getLearningCommandRegistrations(deps: {
   storage: IStorageService;
   modelRouter: ModelRouterService;
   eventBus: ISystemEventBus;
+  baseDataPath: string;
 }): CommandRegistration[] {
   return [
     {
@@ -75,7 +77,8 @@ export function getLearningCommandRegistrations(deps: {
       handler: async (payload: z.infer<typeof FlashcardsSchema>, context) => {
         let source = payload.sourceText ?? '';
         if (!source && payload.sourceFilePath) {
-          source = await fs.readFile(payload.sourceFilePath, 'utf8');
+          const safe = resolveSandboxedPath(deps.baseDataPath, payload.sourceFilePath);
+          source = await fs.readFile(safe, 'utf8');
         }
         if (!source) {
           throw new Error('Provide sourceText or sourceFilePath');
@@ -130,7 +133,8 @@ export function getLearningCommandRegistrations(deps: {
       handler: async (payload: z.infer<typeof SummarizeSchema>) => {
         let text = payload.paperText ?? '';
         if (!text && payload.paperPath) {
-          text = await fs.readFile(payload.paperPath, 'utf8');
+          const safe = resolveSandboxedPath(deps.baseDataPath, payload.paperPath);
+          text = await fs.readFile(safe, 'utf8');
         }
         if (!text) {
           throw new Error('Provide paperText or paperPath');

@@ -218,6 +218,19 @@ export function getCareerCommandRegistrations(deps: CareerDeps): CommandRegistra
           }),
         );
 
+        if (listings.length === 0) {
+          return {
+            jobsFound: 0,
+            listings: [] as Array<{
+              id: string;
+              title: string;
+              company: string;
+              salaryMin: number;
+              url: string;
+            }>,
+          };
+        }
+
         return {
           jobsFound: listings.length,
           listings,

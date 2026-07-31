@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { z } from 'zod';
 import { RuleEngineEvaluator } from '../../../evaluation/rules/rule-engine.evaluator.js';
+import { resolveSandboxedPath } from '../../../infrastructure/services/path-sandbox.js';
 import type { IStorageService } from '../../../infrastructure/services/storage.service.js';
 import {
   createSystemEvent,
@@ -57,6 +58,7 @@ function parseReceiptText(text: string): {
 export function getFinanceCommandRegistrations(deps: {
   storage: IStorageService;
   eventBus: ISystemEventBus;
+  baseDataPath: string;
 }): CommandRegistration[] {
   return [
     {
@@ -66,13 +68,14 @@ export function getFinanceCommandRegistrations(deps: {
         let text = payload.receiptText ?? '';
         let ocrEngine: string | undefined;
         if (!text && payload.receiptFilePath) {
-          const lower = payload.receiptFilePath.toLowerCase();
+          const safe = resolveSandboxedPath(deps.baseDataPath, payload.receiptFilePath);
+          const lower = safe.toLowerCase();
           if (/\.(png|jpe?g|webp|gif|bmp|tiff?)$/.test(lower)) {
-            const ocr = await ocrTask(payload.receiptFilePath);
+            const ocr = await ocrTask(safe);
             text = ocr.text;
             ocrEngine = ocr.engine;
           } else {
-            text = await fs.readFile(payload.receiptFilePath, 'utf8');
+            text = await fs.readFile(safe, 'utf8');
           }
         }
         if (!text) {

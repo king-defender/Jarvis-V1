@@ -6,6 +6,7 @@ import { loadConfig } from './config.js';
 import { createApiRouter } from './control/api/router.js';
 import { transactionIdMiddleware } from './control/api/transaction.middleware.js';
 import { CommandRouter } from './control/command-engine/command.router.js';
+import { getAssistantCommandRegistrations } from './domain/modules/assistant/assistant.module.js';
 import { getAutomationCommandRegistrations } from './domain/modules/automation/automation.module.js';
 import { getBrowserModuleCommandRegistrations } from './domain/modules/browser/browser.module.js';
 import { getCareerCommandRegistrations } from './domain/modules/career/career.module.js';
@@ -179,6 +180,12 @@ async function main(): Promise<void> {
     eventBus,
     log,
     async (command, payload, options) => {
+      if (approvalService.requiresApproval(command)) {
+        throw new Error(
+          `Command "${command}" requires human approval and cannot execute inside a workflow step. ` +
+            `Run it via POST /command or the Approvals queue.`,
+        );
+      }
       const directive: SystemCommandDirective = {
         transactionId: randomUUID(),
         command,
@@ -194,11 +201,26 @@ async function main(): Promise<void> {
     },
   );
 
-  const runCommand = async (directive: SystemCommandDirective) =>
-    commandRouter.route(directive);
+  const runCommand = async (directive: SystemCommandDirective) => {
+    if (approvalService.requiresApproval(directive.command)) {
+      const approval = await approvalService.requestApproval({
+        command: directive.command,
+        payload: directive.payload as Record<string, unknown>,
+        userId: directive.context.userId,
+        transactionId: directive.transactionId,
+      });
+      return {
+        status: 'PENDING_REVIEW',
+        approval,
+        message: 'Command intercepted by Approval Engine',
+      };
+    }
+    return commandRouter.route(directive);
+  };
 
   const registrations = [
     ...getSystemCommandRegistrations(),
+    ...getAssistantCommandRegistrations(),
     ...getCareerCommandRegistrations({
       storage,
       search,
@@ -226,8 +248,17 @@ async function main(): Promise<void> {
       prompts,
       safety,
     }),
-    ...getLearningCommandRegistrations({ storage, modelRouter, eventBus }),
-    ...getFinanceCommandRegistrations({ storage, eventBus }),
+    ...getLearningCommandRegistrations({
+      storage,
+      modelRouter,
+      eventBus,
+      baseDataPath: config.app.baseDataPath,
+    }),
+    ...getFinanceCommandRegistrations({
+      storage,
+      eventBus,
+      baseDataPath: config.app.baseDataPath,
+    }),
     ...getCommunicationCommandRegistrations({
       storage,
       modelRouter,

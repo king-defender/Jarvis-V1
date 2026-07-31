@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { resolveSandboxedPath } from './path-sandbox.js';
 
 export interface IFilesystemService {
   readFile(filePath: string): Promise<string>;
@@ -11,12 +12,7 @@ export class FilesystemService implements IFilesystemService {
   constructor(private readonly rootDir: string) {}
 
   private resolveSafe(filePath: string): string {
-    const root = path.resolve(this.rootDir);
-    const full = path.resolve(root, filePath);
-    if (!full.startsWith(root)) {
-      throw new Error(`Path escapes sandbox: ${filePath}`);
-    }
-    return full;
+    return resolveSandboxedPath(this.rootDir, filePath);
   }
 
   async readFile(filePath: string): Promise<string> {

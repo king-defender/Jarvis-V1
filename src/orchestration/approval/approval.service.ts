@@ -12,12 +12,18 @@ export interface ApprovalPolicy {
   autoApproveTimeoutMs?: number;
 }
 
+export type ApprovalStatus =
+  | 'PENDING_REVIEW'
+  | 'APPROVING'
+  | 'APPROVED'
+  | 'REJECTED';
+
 export interface PendingApprovalRequest {
   id: string;
   command: string;
   payload: Record<string, unknown>;
   userId: string;
-  status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
+  status: ApprovalStatus;
   createdAt: string;
   resolvedAt?: string;
   reason?: string;
@@ -43,7 +49,12 @@ export class ApprovalService {
     },
     {
       id: 'communication-outbound',
-      commandPattern: 'communication.*',
+      commandPattern: 'communication.send-alert',
+      notificationChannel: 'dashboard',
+    },
+    {
+      id: 'platform-email',
+      commandPattern: 'platform.send-email',
       notificationChannel: 'dashboard',
     },
   ];
@@ -101,14 +112,54 @@ export class ApprovalService {
       .toArray();
   }
 
+  async getPending(approvalId: string): Promise<Record<string, unknown> | null> {
+    const doc = await this.storage.collection('pending_approvals').findOne({
+      id: approvalId,
+      status: 'PENDING_REVIEW',
+    });
+    return (doc as Record<string, unknown> | null) ?? null;
+  }
+
+  /** Atomically claim a pending approval so only one approver can execute it. */
+  async claimForExecution(approvalId: string): Promise<Record<string, unknown> | null> {
+    const now = new Date().toISOString();
+    const result = await this.storage.collection('pending_approvals').findOneAndUpdate(
+      { id: approvalId, status: 'PENDING_REVIEW' },
+      {
+        $set: {
+          status: 'APPROVING',
+          updated_at: now,
+        },
+      },
+      { returnDocument: 'after' },
+    );
+    return (result as Record<string, unknown> | null) ?? null;
+  }
+
+  /** Release a claim back to PENDING_REVIEW after a failed execution attempt. */
+  async releaseClaim(approvalId: string, reason?: string): Promise<void> {
+    const now = new Date().toISOString();
+    await this.storage.collection('pending_approvals').updateOne(
+      { id: approvalId, status: 'APPROVING' },
+      {
+        $set: {
+          status: 'PENDING_REVIEW',
+          reason: reason ?? null,
+          updated_at: now,
+        },
+      },
+    );
+  }
+
   async resolve(
     approvalId: string,
     decision: 'APPROVED' | 'REJECTED',
     reason?: string,
   ): Promise<Record<string, unknown>> {
     const now = new Date().toISOString();
+    const fromStatus = decision === 'APPROVED' ? 'APPROVING' : 'PENDING_REVIEW';
     const result = await this.storage.collection('pending_approvals').findOneAndUpdate(
-      { id: approvalId, status: 'PENDING_REVIEW' },
+      { id: approvalId, status: fromStatus },
       {
         $set: {
           status: decision,
@@ -120,10 +171,41 @@ export class ApprovalService {
       { returnDocument: 'after' },
     );
 
+    // Reject may also arrive while still PENDING_REVIEW if never claimed;
+    // APPROVED must come from APPROVING (claim). Fallback for reject from either.
+    if (!result && decision === 'REJECTED') {
+      const fallback = await this.storage.collection('pending_approvals').findOneAndUpdate(
+        { id: approvalId, status: { $in: ['PENDING_REVIEW', 'APPROVING'] } },
+        {
+          $set: {
+            status: 'REJECTED',
+            reason: reason ?? null,
+            resolved_at: now,
+            updated_at: now,
+          },
+        },
+        { returnDocument: 'after' },
+      );
+      if (!fallback) {
+        throw new Error(`Approval not found or already resolved: ${approvalId}`);
+      }
+      this.publishDecision(approvalId, decision, fallback);
+      return fallback as Record<string, unknown>;
+    }
+
     if (!result) {
       throw new Error(`Approval not found or already resolved: ${approvalId}`);
     }
 
+    this.publishDecision(approvalId, decision, result);
+    return result as Record<string, unknown>;
+  }
+
+  private publishDecision(
+    approvalId: string,
+    decision: 'APPROVED' | 'REJECTED',
+    result: Record<string, unknown>,
+  ): void {
     this.eventBus.publish(
       createSystemEvent({
         transactionId: String(result.transaction_id ?? randomUUID()),
@@ -132,7 +214,5 @@ export class ApprovalService {
         producer: 'ApprovalService',
       }),
     );
-
-    return result as Record<string, unknown>;
   }
 }
