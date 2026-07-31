@@ -85,15 +85,18 @@ web/                React dashboard (Vite → public/dashboard/)
 
 You already use **MongoDB Compass**. Point the app at that Mongo; do **not** require Docker.
 
+**One-click:** double-click `start.bat` or run `.\start.ps1`
+
 ```bash
-cp .env.example .env          # already Ollama-ready, BROWSER_ENGINE=fetch
-npm install
-npm run migrate
-npm run dev
+npm run doctor          # preflight (Mongo / Ollama / no cloud keys)
+npm run start:local     # migrate + API
+# other terminal:
+npm run smoke           # prove core paths
 ```
 
 - Dashboard: http://localhost:8080/dashboard/
-- See **[PERSONAL_SETUP.md](./PERSONAL_SETUP.md)** if you return after months — required vs ignore list.
+- Sealed release notes: **[FROZEN.md](./FROZEN.md)** (`v1.0.0`)
+- Return-later guide: **[PERSONAL_SETUP.md](./PERSONAL_SETUP.md)**
 
 ### Optional local LLM
 

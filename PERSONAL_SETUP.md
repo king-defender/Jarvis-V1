@@ -63,11 +63,14 @@ Explained below — empty values are correct.
 
 ```text
 [ ] Mongo running (Compass can connect to 127.0.0.1:27017)
-[ ] cd project → npm install → npm run migrate → npm run dev
-[ ] Dashboard Connect works
-[ ] (optional) Ollama installed + llama3.2 pulled → Platform page shows Ollama up
-[ ] Ignore Docker, Redis, SMTP, Slack, GitHub, cloud keys unless you explicitly want them
+[ ] Double-click start.bat  OR  run: .\start.ps1
+[ ] Dashboard Connect works → http://localhost:8080/dashboard/
+[ ] (optional) npm run smoke
+[ ] (optional) Ollama + llama3.2 for better drafts
+[ ] Ignore Docker, Redis, SMTP, Slack, GitHub, cloud keys
 ```
+
+Read **FROZEN.md** — this tree is sealed as `v1.0.0`.
 
 ## Smoke tests after start
 

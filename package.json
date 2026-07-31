@@ -1,6 +1,6 @@
 {
   "name": "command-os",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "CommandOS — deterministic command, workflow, and rule platform",
   "main": "dist/app.js",
@@ -10,8 +10,12 @@
     "build": "tsc -p tsconfig.json && npm run build:web",
     "build:web": "vite build",
     "start": "node dist/src/app.js",
+    "start:local": "npm run migrate && npm run dev",
     "migrate": "tsx scripts/migrate.ts",
     "backup": "tsx scripts/backup.ts",
+    "doctor": "tsx scripts/doctor.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "freeze-check": "npm run typecheck && npm test && npm run build && npm run doctor",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit"
