@@ -1,6 +1,6 @@
 /**
  * Deterministic natural-language → command intent resolver.
- * No AI keys required. Used by voice/text assistant entry points.
+ * Taught intents from MemoryService are checked first (runtime learning).
  */
 export interface AssistantIntent {
   kind: 'command' | 'workflow' | 'help' | 'unknown';
@@ -9,13 +9,25 @@ export interface AssistantIntent {
   payload: Record<string, unknown>;
   spokenReply: string;
   confidence: number;
+  learned?: boolean;
 }
 
-const HELP_TEXT =
-  'I can search jobs, ping the system, run demos, draft cover letters, check health, or list commands. Try: "search remote typescript jobs" or "run system demo".';
+export type TaughtIntentMatch = {
+  kind: 'command' | 'workflow';
+  target: string;
+  payload: Record<string, unknown>;
+  spokenReply: string;
+};
 
-export function interpretUtterance(utterance: string): AssistantIntent {
-  const text = utterance.trim().toLowerCase().replace(/[?.!,]/g, '');
+const HELP_TEXT =
+  'I learn from you. Say "when I say X run system.ping", "remember my role is engineer", ' +
+  '"that was good/bad", or "update your code to …". Also: ping, demo, search jobs, AI status.';
+
+export function interpretUtterance(
+  utterance: string,
+  taught?: TaughtIntentMatch | null,
+): AssistantIntent {
+  const text = utterance.trim().toLowerCase().replace(/[?!,]/g, '');
   if (!text) {
     return {
       kind: 'help',
@@ -25,8 +37,115 @@ export function interpretUtterance(utterance: string): AssistantIntent {
     };
   }
 
+  if (taught) {
+    if (taught.kind === 'command') {
+      return {
+        kind: 'command',
+        command: taught.target,
+        payload: taught.payload,
+        spokenReply: taught.spokenReply,
+        confidence: 0.99,
+        learned: true,
+      };
+    }
+    return {
+      kind: 'workflow',
+      workflow: taught.target,
+      payload: taught.payload,
+      spokenReply: taught.spokenReply,
+      confidence: 0.99,
+      learned: true,
+    };
+  }
+
   if (/\b(help|what can you do|commands)\b/.test(text)) {
     return { kind: 'help', payload: {}, spokenReply: HELP_TEXT, confidence: 1 };
+  }
+
+  // Teach: "when I say morning check run system.ping"
+  const teach = text.match(
+    /\bwhen i (?:say|say the phrase)\s+(.+?)\s+(?:run|start|execute)\s+([a-z0-9._-]+)\b/,
+  );
+  if (teach?.[1] && teach[2]) {
+    const target = teach[2];
+    const resolvedKind =
+      target === 'system.demo' ||
+      target === 'career.job-application' ||
+      target === 'system.parallel-demo'
+        ? 'workflow'
+        : 'command';
+    return {
+      kind: 'command',
+      command: 'assistant.teach',
+      payload: {
+        phrase: teach[1].trim(),
+        kind: resolvedKind,
+        target,
+        payload: {},
+      },
+      spokenReply: `I will remember: when you say "${teach[1].trim()}", run ${target}.`,
+      confidence: 0.95,
+    };
+  }
+
+  // Remember: "remember my title is staff engineer"
+  const remember = text.match(/\bremember\s+(?:that\s+)?(.+)$/);
+  if (remember?.[1] && !teach) {
+    const body = remember[1].trim();
+    const kv = body.match(/^(.+?)\s+is\s+(.+)$/);
+    return {
+      kind: 'command',
+      command: 'assistant.remember',
+      payload: kv
+        ? { key: kv[1]!.trim(), value: kv[2]!.trim() }
+        : { key: 'note', value: body },
+      spokenReply: 'I will remember that.',
+      confidence: 0.9,
+    };
+  }
+
+  if (/\b(that was (good|great|helpful)|good job|thanks)\b/.test(text)) {
+    return {
+      kind: 'command',
+      command: 'assistant.feedback',
+      payload: { rating: 'up', note: utterance.trim() },
+      spokenReply: 'Thanks — I logged positive feedback.',
+      confidence: 0.9,
+    };
+  }
+
+  if (/\b(that was (bad|wrong|unhelpful)|not what i wanted)\b/.test(text)) {
+    return {
+      kind: 'command',
+      command: 'assistant.feedback',
+      payload: { rating: 'down', note: utterance.trim() },
+      spokenReply: 'Logged. Teach me with: when I say … run …',
+      confidence: 0.9,
+    };
+  }
+
+  // Self code edit: "update your code to …" / "fix your code …" / "patch yourself …"
+  const codeEdit = text.match(
+    /\b(?:update|fix|change|patch)\s+(?:your\s+)?(?:code|yourself|source)\s+(?:to\s+|so\s+|and\s+)?(.+)$/,
+  );
+  if (codeEdit?.[1]) {
+    return {
+      kind: 'command',
+      command: 'platform.self-edit',
+      payload: { instruction: codeEdit[1].trim(), apply: true },
+      spokenReply: 'I will propose and apply a sandboxed code change from that instruction.',
+      confidence: 0.92,
+    };
+  }
+
+  if (/\b(what do you remember|recall|show memory|list teachings)\b/.test(text)) {
+    return {
+      kind: 'command',
+      command: 'assistant.recall',
+      payload: {},
+      spokenReply: 'Looking up what I have learned about you.',
+      confidence: 0.9,
+    };
   }
 
   if (/\b(ping|are you there|hello|hi)\b/.test(text)) {
@@ -56,7 +175,7 @@ export function interpretUtterance(utterance: string): AssistantIntent {
       workflow: 'career.job-application',
       payload: {
         keywords: keywords.length > 0 ? keywords : ['TypeScript'],
-        location: /\bremote\b/.test(text) ? 'Remote' : 'Remote',
+        location: 'Remote',
         resumeId: 'primary-resume-1',
         minSalary: 90000,
       },
@@ -72,7 +191,7 @@ export function interpretUtterance(utterance: string): AssistantIntent {
       command: 'career.search-jobs',
       payload: {
         keywords: keywords.length > 0 ? keywords : ['software'],
-        location: /\bremote\b/.test(text) ? 'Remote' : 'Remote',
+        location: 'Remote',
       },
       spokenReply: `Searching for ${keywords.join(' ') || 'software'} jobs.`,
       confidence: 0.9,

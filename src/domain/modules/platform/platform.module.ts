@@ -93,12 +93,66 @@ export interface PlatformDeps {
   prompts: PromptLibrary;
   safety: SafetyService;
   evaluation: EvaluationService;
+  codeSelfEdit?: import('../../../infrastructure/services/code-self-edit.service.js').CodeSelfEditService;
+  selfCodeEditAutoApply?: boolean;
   slackWebhookUrl?: string;
   execute?: boolean;
 }
 
 export function getPlatformCommandRegistrations(deps: PlatformDeps): CommandRegistration[] {
   return [
+    {
+      command: 'platform.self-edit',
+      schema: z.object({
+        instruction: z.string().min(3),
+        pathHint: z.string().optional(),
+        apply: z.boolean().default(true),
+        proposalId: z.string().optional(),
+      }),
+      handler: async (
+        payload: {
+          instruction: string;
+          pathHint?: string;
+          apply: boolean;
+          proposalId?: string;
+        },
+        context,
+      ) => {
+        if (!deps.codeSelfEdit) {
+          throw new Error('Self-edit service not configured');
+        }
+        if (payload.proposalId) {
+          const applied = await deps.codeSelfEdit.applyProposal(payload.proposalId);
+          return {
+            applied: true,
+            proposal: applied,
+            message: 'Restart or rely on tsx watch to load TypeScript changes.',
+          };
+        }
+        if (payload.apply && deps.selfCodeEditAutoApply !== false) {
+          const result = await deps.codeSelfEdit.proposeAndApply({
+            userId: context.userId,
+            instruction: payload.instruction,
+            ...(payload.pathHint ? { pathHint: payload.pathHint } : {}),
+          });
+          return {
+            ...result,
+            message:
+              'Code change applied under allowlist (src/, web/src/, docs/, scripts/). Restart if needed.',
+          };
+        }
+        const proposal = await deps.codeSelfEdit.proposeFromInstruction({
+          userId: context.userId,
+          instruction: payload.instruction,
+          ...(payload.pathHint ? { pathHint: payload.pathHint } : {}),
+        });
+        return {
+          applied: false,
+          proposal,
+          message: 'Proposal stored. Run platform.self-edit with proposalId to apply.',
+        };
+      },
+    },
     {
       command: 'platform.ai-status',
       schema: z.object({}),

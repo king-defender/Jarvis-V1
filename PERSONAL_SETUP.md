@@ -72,11 +72,18 @@ Explained below — empty values are correct.
 
 Read **FROZEN.md** — this tree is sealed as `v1.0.0`.
 
-## Smoke tests after start
+## Self-learning (no manual code updates required)
 
-```bash
-curl http://localhost:8080/api/health
-# database should be "up"; cache may be "down" without Redis — that is OK
-```
+Jarvis improves from **use**, stored in Mongo:
 
-Dashboard → Platform: AI mode `ollama`; if Ollama is off, drafts still work offline.
+| You say / do | What happens |
+| --- | --- |
+| `when I say morning check run system.ping` | Saves a taught intent forever |
+| `remember my title is staff engineer` | Saves a memory note |
+| `that was good` / `that was bad` | Stores feedback |
+| `what do you remember` | Recalls notes + teachings |
+| `update your code to …` | Proposes + applies a **sandboxed** file change (`SELF_CODE_EDIT=true`) |
+
+**Code self-edit allowlist:** `src/`, `web/src/`, `docs/`, `scripts/` (+ a few root docs). Never `.env`, `node_modules`, or `.git`.
+
+Runtime learning does **not** require redeploying. Code edits need the API process to reload (`tsx watch` via `start.ps1` does this for TypeScript).

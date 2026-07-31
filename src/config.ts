@@ -75,6 +75,10 @@ export const SystemConfigSchema = z.object({
   integrations: z.object({
     slackWebhookUrl: z.string().optional(),
   }),
+  selfImprove: z.object({
+    /** When true, platform.self-edit applies code under allowlist without a second step. */
+    autoApplyCodeEdits: booleanFromEnv.default(true),
+  }),
 });
 
 export type SystemConfig = z.infer<typeof SystemConfigSchema>;
@@ -146,6 +150,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SystemConfig {
     },
     integrations: {
       slackWebhookUrl: env.SLACK_WEBHOOK_URL || undefined,
+    },
+    selfImprove: {
+      autoApplyCodeEdits: env.SELF_CODE_EDIT,
     },
   });
 

@@ -11,6 +11,8 @@ This build is meant to sit untouched for months and still boot on your PC.
 - Local MongoDB (Compass) — **no Docker required**
 - AI via **Ollama** or offline composer — **no cloud API keys**
 - Dashboard + voice + approvals + RBAC hardened against back-button loops
+- **Runtime learning** (teach / remember / feedback) in Mongo
+- **Sandboxed self-code-edit** (`platform.self-edit`, `SELF_CODE_EDIT=true`) under allowlisted paths
 
 ## Do not require
 

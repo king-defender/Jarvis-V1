@@ -8,6 +8,7 @@ import type { DecisionEngine } from '../../evaluation/decision/decision-engine.j
 import type { CacheService } from '../../infrastructure/cache/redis.service.js';
 import type { ConnectorRegistry } from '../../infrastructure/connectors/connector.js';
 import type { ModelRouterService } from '../../infrastructure/ai/model-router.service.js';
+import type { MemoryService } from '../../infrastructure/services/memory.service.js';
 import type { DatabaseService } from '../../infrastructure/database/connection.service.js';
 import type {
   MetricsService,
@@ -127,6 +128,7 @@ export function createApiRouter(deps: {
   storage: IStorageService;
   notifications: INotificationService;
   modelRouter: ModelRouterService;
+  memory: MemoryService;
 }): Router {
   const router = Router();
   const requireAuth = createAuthMiddleware(deps.config);
@@ -138,7 +140,7 @@ export function createApiRouter(deps: {
     const ai = await deps.modelRouter.status().catch(() => null);
     res.status(databaseOk ? 200 : 503).json({
       status: databaseOk ? 'ok' : 'degraded',
-      version: '0.1.0',
+      version: '1.0.0',
       checks: {
         database: databaseOk ? 'up' : 'down',
         cache: cacheOk ? 'up' : 'down',
@@ -295,18 +297,47 @@ export function createApiRouter(deps: {
       res.status(400).json({ error: 'utterance required' });
       return;
     }
-    const intent = interpretUtterance(utterance);
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ error: 'UNAUTHORIZED' });
+      return;
+    }
+
+    const taught = await deps.memory.findTaughtIntent(userId, utterance);
+    const intent = interpretUtterance(
+      utterance,
+      taught
+        ? {
+            kind: taught.kind,
+            target: taught.target,
+            payload: taught.payload,
+            spokenReply: taught.spokenReply,
+          }
+        : null,
+    );
+
     if (!autoExecute || intent.kind === 'help' || intent.kind === 'unknown') {
-      res.json({ intent, executed: false });
+      const interaction: {
+        userId: string;
+        utterance: string;
+        ok: boolean;
+        summary: string;
+        command?: string;
+        workflow?: string;
+      } = {
+        userId,
+        utterance,
+        ok: intent.kind !== 'unknown',
+        summary: intent.spokenReply,
+      };
+      if (intent.command) interaction.command = intent.command;
+      if (intent.workflow) interaction.workflow = intent.workflow;
+      await deps.memory.recordInteraction(interaction);
+      res.json({ intent, executed: false, learned: Boolean(intent.learned) });
       return;
     }
     if (!canMutatePlatform(req.user?.role)) {
       res.status(403).json({ error: 'FORBIDDEN' });
-      return;
-    }
-    const userId = req.user?.userId;
-    if (!userId) {
-      res.status(401).json({ error: 'UNAUTHORIZED' });
       return;
     }
 
@@ -323,11 +354,19 @@ export function createApiRouter(deps: {
             userId,
             transactionId: req.transactionId ?? randomUUID(),
           });
+          await deps.memory.recordInteraction({
+            userId,
+            utterance,
+            command: intent.command,
+            ok: true,
+            summary: `Pending approval for ${intent.command}`,
+          });
           res.status(202).json({
             intent,
             executed: false,
             status: 'PENDING_REVIEW',
             approval,
+            learned: Boolean(intent.learned),
           });
           return;
         }
@@ -342,7 +381,14 @@ export function createApiRouter(deps: {
             bypassCache: false,
           },
         });
-        res.json({ intent, executed: true, result });
+        await deps.memory.recordInteraction({
+          userId,
+          utterance,
+          command: intent.command,
+          ok: true,
+          summary: `Executed ${intent.command}`,
+        });
+        res.json({ intent, executed: true, result, learned: Boolean(intent.learned) });
         return;
       }
       if (intent.kind === 'workflow' && intent.workflow) {
@@ -351,11 +397,26 @@ export function createApiRouter(deps: {
           userId,
           payload: intent.payload,
         });
-        res.json({ intent, executed: true, result });
+        await deps.memory.recordInteraction({
+          userId,
+          utterance,
+          workflow: intent.workflow,
+          ok: true,
+          summary: `Started workflow ${intent.workflow}`,
+        });
+        res.json({ intent, executed: true, result, learned: Boolean(intent.learned) });
         return;
       }
-      res.json({ intent, executed: false });
+      res.json({ intent, executed: false, learned: Boolean(intent.learned) });
     } catch (error: unknown) {
+      await deps.memory.recordInteraction({
+        userId,
+        utterance,
+        ok: false,
+        summary: error instanceof Error ? error.message : String(error),
+        ...(intent.command ? { command: intent.command } : {}),
+        ...(intent.workflow ? { workflow: intent.workflow } : {}),
+      });
       res.status(400).json({
         intent,
         error: error instanceof Error ? error.message : String(error),

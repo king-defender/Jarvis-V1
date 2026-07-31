@@ -25,6 +25,8 @@ import {
   PromptLibrary,
   SafetyService,
 } from './infrastructure/ai/prompt-safety-eval.js';
+import { MemoryService } from './infrastructure/services/memory.service.js';
+import { CodeSelfEditService } from './infrastructure/services/code-self-edit.service.js';
 import { ModelRouterService } from './infrastructure/ai/model-router.service.js';
 import { CacheService } from './infrastructure/cache/redis.service.js';
 import {
@@ -117,6 +119,7 @@ async function main(): Promise<void> {
   await browser.init();
 
   const storage = new StorageService(database.getDb(), database.getClient());
+  const memory = new MemoryService(storage);
   const approvalService = new ApprovalService(storage, eventBus);
   const tenantService = new TenantService(storage);
   const filesystem = new FilesystemService(config.app.baseDataPath);
@@ -126,6 +129,7 @@ async function main(): Promise<void> {
   const metrics = new MetricsService();
   const tracing = new TracingService();
   const connectors = new ConnectorRegistry();
+  const codeSelfEdit = new CodeSelfEditService(path.resolve('.'), storage, modelRouter);
   const healthConnector = new HttpConnector('health-self');
   await healthConnector.initialize({
     baseUrl: `http://127.0.0.1:${config.app.port}/api/health`,
@@ -231,7 +235,7 @@ async function main(): Promise<void> {
 
   const registrations = [
     ...getSystemCommandRegistrations(),
-    ...getAssistantCommandRegistrations(),
+    ...getAssistantCommandRegistrations({ memory }),
     ...getCareerCommandRegistrations({
       storage,
       search,
@@ -307,6 +311,8 @@ async function main(): Promise<void> {
       prompts,
       safety,
       evaluation,
+      codeSelfEdit,
+      selfCodeEditAutoApply: config.selfImprove.autoApplyCodeEdits,
       ...(config.integrations.slackWebhookUrl
         ? { slackWebhookUrl: config.integrations.slackWebhookUrl }
         : {}),
@@ -411,6 +417,7 @@ async function main(): Promise<void> {
       storage,
       notifications,
       modelRouter,
+      memory,
     }),
   );
 

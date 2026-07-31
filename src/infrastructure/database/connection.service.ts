@@ -34,6 +34,11 @@ const COLLECTIONS = [
   'decision_log',
   'interview_prep',
   'dead_letter_queue',
+  'assistant_teachings',
+  'assistant_memory',
+  'assistant_interactions',
+  'assistant_feedback',
+  'code_change_proposals',
 ] as const;
 
 export class DatabaseService {
@@ -110,6 +115,12 @@ export class DatabaseService {
     await db.collection('automation_triggers').createIndex({ id: 1 }, { unique: true });
     await db.collection('tenants').createIndex({ slug: 1 }, { unique: true });
     await db.collection('users').createIndex({ tenant_id: 1, email: 1 }, { unique: true });
+    await db.collection('assistant_teachings').createIndex({ user_id: 1, phrase: 1 }, { unique: true });
+    await db.collection('assistant_memory').createIndex({ user_id: 1, key: 1 }, { unique: true });
+    await db.collection('assistant_interactions').createIndex({ user_id: 1, created_at: -1 });
+    await db.collection('assistant_feedback').createIndex({ user_id: 1, created_at: -1 });
+    await db.collection('code_change_proposals').createIndex({ id: 1 }, { unique: true });
+    await db.collection('code_change_proposals').createIndex({ user_id: 1, status: 1 });
 
     this.log.info('MongoDB collections and indexes are up to date');
   }
