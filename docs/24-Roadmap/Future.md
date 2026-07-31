@@ -1,26 +1,32 @@
 # Roadmap status (honest)
 
-## Completed phases
+## Complete
+
+All planned product phases are done. There is **no remaining engineering backlog**.
+
 * MVP / Phase 2 / Phase 3 / Future scaffolding — **done**
 * Production hardening (AI tiers, Playwright, SMTP, plugins, decisions, RBAC, connectors) — **done**
-* OCR, git clone, DuckDuckGo search, React dashboard — **done**
+* OCR, git clone, DuckDuckGo search, React dashboard, voice assistant — **done**
 * LLM-backed career/cover/interview, PR review, competitor analysis — **done**
-* PDF file parsing (`platform.parse-pdf`), PromptLibrary / Safety / Evaluation — **done**
-* API key auth (`x-api-key` + `API_KEY_HASH`), email alerts via EmailService — **done**
-* Multi-page React dashboard navigation — **done**
+* PDF parsing, PromptLibrary / Safety / Evaluation, API key auth — **done**
+* Workflow pause/resume on approval gates — **done**
+* Ollama first-class mode (`AI_MODE=ollama` default) — **done**
 
-## Offline-first (default)
-* `AI_MODE=offline` (default) — **no API keys required**
-* ModelRouter uses a deterministic composer for drafts (resume, cover letter, interview, PR review, etc.)
-* `AI_MODE=ollama` — local Ollama (`OLLAMA_BASE_URL` defaults to `http://127.0.0.1:11434`, model `AI_LOCAL_MODEL`)
-* `AI_MODE=hybrid` — Ollama (if configured) → Anthropic/Gemini keys → offline composer
+## Operator-only step (not code)
 
-## Still optional integrations
+1. Install [Ollama](https://ollama.com)
+2. `ollama pull llama3.2`
+3. Keep Ollama running (default `http://127.0.0.1:11434`)
+
+Until then, drafts use the deterministic offline composer automatically.
+
+## Optional extras (not required)
+
 * SMTP, GitHub/Slack tokens, Playwright Chromium, LinkedIn cookies
-* Cloud AI keys only needed for `hybrid` without Ollama
-* Rule editor remains structured JSON (not a drag-and-drop canvas)
+* Cloud keys only if you switch to `AI_MODE=hybrid`
 
-## Intentionally lightweight
-* Rule editor is structured JSON (not a drag-and-drop canvas)
-* Widgets are embeddable status panels, not a full desktop OS shell
-* Plugin loader registers commands; no OS-level sandbox VM
+## Intentionally out of scope
+
+* Drag-and-drop rule canvas (JSON editor is the product surface)
+* Full desktop OS shell (widgets are embeddable status panels)
+* Plugin OS-level sandbox VM

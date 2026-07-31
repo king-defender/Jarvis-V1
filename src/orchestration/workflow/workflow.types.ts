@@ -53,5 +53,7 @@ export type RunCommandFn = (
     userId: string;
     triggerSource: 'CLI' | 'DASHBOARD' | 'CRON' | 'WEBHOOK';
     bypassCache?: boolean;
+    workflowId?: string;
+    stepName?: string;
   },
 ) => Promise<unknown>;

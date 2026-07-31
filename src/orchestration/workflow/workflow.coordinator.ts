@@ -5,6 +5,7 @@ import {
   classifyError,
   shouldRetry,
 } from '../recovery/recovery.js';
+import { WorkflowPausedError } from './workflow-paused.error.js';
 import type {
   RunCommandFn,
   WorkflowContext,
@@ -84,10 +85,35 @@ export class WorkflowCoordinator {
           userId,
           triggerSource: 'DASHBOARD',
           bypassCache: step.bypassCache ?? false,
+          workflowId: this.context.workflowId,
+          stepName: step.name,
         });
+
+        if (
+          result &&
+          typeof result === 'object' &&
+          (result as { status?: string }).status === 'PENDING_REVIEW'
+        ) {
+          const approval = (result as { approval?: { id?: string } }).approval;
+          const approvalId = String(approval?.id ?? '');
+          this.context.status = 'PAUSED';
+          this.context.accumulatedData[step.name] = {
+            pendingApproval: true,
+            approval,
+          };
+          throw new WorkflowPausedError(
+            approvalId,
+            step.name,
+            `Step "${step.name}" paused for approval ${approvalId}`,
+          );
+        }
+
         this.context.accumulatedData[step.name] = result as unknown;
         return true;
       } catch (err: unknown) {
+        if (err instanceof WorkflowPausedError) {
+          throw err;
+        }
         attempts += 1;
         const error = err as { status?: string; partialOutput?: unknown; message?: string };
         const errorClass = classifyError(err);

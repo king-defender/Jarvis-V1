@@ -47,7 +47,7 @@ export const SystemConfigSchema = z.object({
     engine: z.enum(['auto', 'playwright', 'fetch']).default('auto'),
   }),
   ai: z.object({
-    mode: z.enum(['offline', 'ollama', 'hybrid']).default('offline'),
+    mode: z.enum(['offline', 'ollama', 'hybrid']).default('ollama'),
     defaultModel: z.string().default('claude-3-5-sonnet-20241022'),
     fallbackModel: z.string().default('gemini-1.5-flash'),
     localModel: z.string().default('llama3.2'),
@@ -55,7 +55,7 @@ export const SystemConfigSchema = z.object({
     providerKey: z.string().optional(),
     anthropicApiKey: z.string().optional(),
     geminiApiKey: z.string().optional(),
-    ollamaBaseUrl: z.string().optional(),
+    ollamaBaseUrl: z.string().default('http://127.0.0.1:11434'),
     ollamaTimeoutMs: z.coerce.number().int().default(120_000),
   }),
   email: z.object({
@@ -127,9 +127,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SystemConfig {
       providerKey: env.AI_PROVIDER_KEY || undefined,
       anthropicApiKey: env.ANTHROPIC_API_KEY || undefined,
       geminiApiKey: env.GEMINI_API_KEY || undefined,
-      ollamaBaseUrl:
-        env.OLLAMA_BASE_URL ||
-        (env.AI_MODE === 'ollama' ? 'http://127.0.0.1:11434' : undefined),
+      ollamaBaseUrl: env.OLLAMA_BASE_URL || undefined,
       ollamaTimeoutMs: env.OLLAMA_TIMEOUT_MS,
     },
     email: {

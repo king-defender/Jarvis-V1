@@ -169,6 +169,7 @@ export class ModelRouterService {
   }
 
   private ollamaBase(): string | null {
+    if (this.config.ai.mode === 'offline') return null;
     const raw = this.config.ai.ollamaBaseUrl?.trim();
     if (!raw) return null;
     return raw.replace(/\/$/, '');

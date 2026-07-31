@@ -604,6 +604,19 @@ export function createApiRouter(deps: {
           'REJECTED',
           typeof req.body?.reason === 'string' ? req.body.reason : undefined,
         );
+        const rejectedPayload = (approval.payload as Record<string, unknown> | undefined) ?? {};
+        const resumeWorkflowId =
+          typeof rejectedPayload.__resumeWorkflowId === 'string'
+            ? rejectedPayload.__resumeWorkflowId
+            : undefined;
+        if (resumeWorkflowId) {
+          await deps.workflowRuntime.failPausedWorkflow(
+            resumeWorkflowId,
+            typeof req.body?.reason === 'string'
+              ? req.body.reason
+              : 'Approval rejected while workflow was paused',
+          );
+        }
         res.json({ approval });
         return;
       }
@@ -615,12 +628,23 @@ export function createApiRouter(deps: {
         return;
       }
 
+      const rawPayload = (pending.payload as Record<string, unknown>) ?? {};
+      const resumeWorkflowId =
+        typeof rawPayload.__resumeWorkflowId === 'string'
+          ? rawPayload.__resumeWorkflowId
+          : undefined;
+      const resumeStepName =
+        typeof rawPayload.__resumeStepName === 'string' ? rawPayload.__resumeStepName : undefined;
+      const cleanPayload = { ...rawPayload };
+      delete cleanPayload.__resumeWorkflowId;
+      delete cleanPayload.__resumeStepName;
+
       const requesterId = String(pending.userId);
       const directive: SystemCommandDirective = {
         transactionId: randomUUID(),
         command: String(pending.command),
         timestamp: new Date().toISOString(),
-        payload: (pending.payload as Record<string, unknown>) ?? {},
+        payload: cleanPayload,
         context: {
           userId: requesterId,
           triggerSource: 'DASHBOARD',
@@ -634,7 +658,22 @@ export function createApiRouter(deps: {
           'APPROVED',
           typeof req.body?.reason === 'string' ? req.body.reason : undefined,
         );
-        res.json({ approval, execution: { status: 'COMPLETED', result } });
+
+        let workflowResume: { status: string } | undefined;
+        if (resumeWorkflowId && resumeStepName) {
+          workflowResume = await deps.workflowRuntime.completePausedStepAndResume({
+            workflowId: resumeWorkflowId,
+            stepName: resumeStepName,
+            result,
+            userId: requesterId,
+          });
+        }
+
+        res.json({
+          approval,
+          execution: { status: 'COMPLETED', result },
+          ...(workflowResume ? { workflow: workflowResume } : {}),
+        });
       } catch (execError: unknown) {
         const message = execError instanceof Error ? execError.message : String(execError);
         await deps.approvalService.releaseClaim(String(req.params.id), message);

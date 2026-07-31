@@ -181,10 +181,21 @@ async function main(): Promise<void> {
     log,
     async (command, payload, options) => {
       if (approvalService.requiresApproval(command)) {
-        throw new Error(
-          `Command "${command}" requires human approval and cannot execute inside a workflow step. ` +
-            `Run it via POST /command or the Approvals queue.`,
-        );
+        const approval = await approvalService.requestApproval({
+          command,
+          payload: {
+            ...payload,
+            ...(options.workflowId ? { __resumeWorkflowId: options.workflowId } : {}),
+            ...(options.stepName ? { __resumeStepName: options.stepName } : {}),
+          },
+          userId: options.userId,
+          transactionId: options.transactionId,
+        });
+        return {
+          status: 'PENDING_REVIEW',
+          approval,
+          message: 'Command intercepted by Approval Engine; workflow paused',
+        };
       }
       const directive: SystemCommandDirective = {
         transactionId: randomUUID(),

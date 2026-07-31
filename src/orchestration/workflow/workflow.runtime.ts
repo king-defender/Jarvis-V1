@@ -6,6 +6,7 @@ import {
 } from '../../infrastructure/services/event-bus.service.js';
 import type { ILoggingService } from '../../infrastructure/services/logging.service.js';
 import { WorkflowCoordinator } from './workflow.coordinator.js';
+import { isWorkflowPausedError } from './workflow-paused.error.js';
 import type {
   ExecutionContext,
   RunCommandFn,
@@ -193,6 +194,60 @@ export class WorkflowRuntime {
     return this.runWorkflow(workflowId, userId);
   }
 
+  /**
+   * After an approval executes a paused step, store the result and continue the workflow.
+   */
+  async completePausedStepAndResume(input: {
+    workflowId: string;
+    stepName: string;
+    result: unknown;
+    userId: string;
+  }): Promise<{ status: WorkflowStatus }> {
+    const doc = await this.db.collection('workflows').findOne({ id: input.workflowId });
+    if (!doc) {
+      throw new Error(`Workflow not found: ${input.workflowId}`);
+    }
+    if (String(doc.status) !== 'PAUSED') {
+      throw new Error(`Workflow is not paused: ${doc.status}`);
+    }
+
+    const definition = this.definitions.get(String(doc.name));
+    if (!definition) {
+      throw new Error(`Workflow definition missing: ${doc.name}`);
+    }
+
+    const stepIndex = definition.steps.findIndex((s) => s.name === input.stepName);
+    if (stepIndex < 0) {
+      throw new Error(`Unknown workflow step: ${input.stepName}`);
+    }
+
+    const accumulated =
+      (doc.accumulated_data as Record<string, unknown>) ??
+      ({ context: doc.input_payload ?? {} } as Record<string, unknown>);
+    accumulated[input.stepName] = input.result as unknown;
+
+    const now = new Date().toISOString();
+    await this.db.collection('tasks').updateOne(
+      { workflow_id: input.workflowId, name: input.stepName },
+      { $set: { status: 'COMPLETED', updated_at: now } },
+    );
+    await this.updateWorkflow(input.workflowId, {
+      accumulated_data: accumulated,
+      current_step_index: stepIndex + 1,
+      status: 'PAUSED',
+      pause_reason: null,
+    });
+
+    return this.resume(input.workflowId, input.userId);
+  }
+
+  async failPausedWorkflow(workflowId: string, reason: string): Promise<void> {
+    await this.updateWorkflow(workflowId, {
+      status: 'FAILED',
+      error_message: reason,
+    });
+  }
+
   /** Groups sequential steps; adjacent steps with the same parallelGroup run together. */
   static planBatches(steps: WorkflowStep[]): WorkflowStep[][] {
     const batches: WorkflowStep[][] = [];
@@ -323,6 +378,31 @@ export class WorkflowRuntime {
       this.log.info('Workflow completed', { workflowId, status: finalStatus });
       return { status: finalStatus };
     } catch (error: unknown) {
+      if (isWorkflowPausedError(error)) {
+        const updated = coordinator.getContext();
+        await this.pause(workflowId, `awaiting_approval:${error.approvalId}`);
+        await this.updateWorkflow(workflowId, {
+          accumulated_data: updated.accumulatedData,
+          current_step_index: currentStepIndex,
+          pause_reason: `awaiting_approval:${error.approvalId}`,
+        });
+        await this.db.collection('tasks').updateOne(
+          { workflow_id: workflowId, name: error.stepName },
+          {
+            $set: {
+              status: 'PAUSED',
+              updated_at: new Date().toISOString(),
+            },
+          },
+        );
+        this.log.info('Workflow paused for approval', {
+          workflowId,
+          approvalId: error.approvalId,
+          step: error.stepName,
+        });
+        return { status: 'PAUSED' };
+      }
+
       const message = error instanceof Error ? error.message : String(error);
       if (token?.isCancelled) {
         await this.updateWorkflow(workflowId, {
@@ -354,7 +434,11 @@ export class WorkflowRuntime {
       this.log.error('Workflow failed', { workflowId, error: message });
       throw error;
     } finally {
-      this.cancellations.delete(workflowId);
+      // Keep cancellation token while paused so cancel still works.
+      const latest = await this.db.collection('workflows').findOne({ id: workflowId });
+      if (String(latest?.status) !== 'PAUSED') {
+        this.cancellations.delete(workflowId);
+      }
     }
   }
 
