@@ -218,6 +218,21 @@ Skills that draft text (resume, cover letter, PR review, competitor notes, etc.)
 
 Mutating surfaces (rules, tenants, workflow resume/cancel, decision execute, assistant auto-execute) require mutate-capable roles. Approvals require `admin` or `owner`.
 
+### Browser auth navigation (back-button / loops)
+
+The dashboard hardens against common SPA auth bugs:
+
+| Bug | Mitigation |
+| --- | --- |
+| Back button returns a signed-in user to Login | Auth gate never renders Login while a session exists; `history.replaceState` marks `app` vs `login` |
+| bfcache restores a stale login/app shell | `pageshow` (persisted) re-syncs from live `sessionStorage`; dashboard HTML is `Cache-Control: no-store` |
+| Logout ↔ home redirect loop | Single-flight `clearSession()`; API clears session only on **401** (not 403); logout clears token **before** switching view |
+| Stale token after expiry | Bootstrap validates `/dashboard/summary`; failed auth forces login once |
+
+Source: `web/src/auth/session.ts`, `web/src/auth/navigation-guard.ts`.
+
+For React Router apps, apply the same rules: authenticated routes redirect **away** from `/login` with `replace: true`; guest routes redirect to `/login` with `replace: true`; never `navigate('/home')` after a logout that already cleared the token without a single authority for “am I logged in?”.
+
 ---
 
 ## How to use

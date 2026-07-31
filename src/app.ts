@@ -371,13 +371,23 @@ async function main(): Promise<void> {
   app.use(transactionIdMiddleware);
   app.use(createRateLimitMiddleware({ windowMs: 60_000, max: 300 }));
   app.use(createAuditMiddleware(storage));
+  app.use('/dashboard', (_req, res, next) => {
+    // Prevent bfcache / back-forward from serving a stale authenticated shell.
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    next();
+  });
   app.use(
     '/dashboard',
-    express.static(path.resolve('public/dashboard'), { index: 'index.html' }),
+    express.static(path.resolve('public/dashboard'), { index: 'index.html', etag: false }),
   );
+  app.use('/widgets', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    next();
+  });
   app.use(
     '/widgets',
-    express.static(path.resolve('public/widgets'), { index: 'index.html' }),
+    express.static(path.resolve('public/widgets'), { index: 'index.html', etag: false }),
   );
   app.get('/openapi.json', (_req, res) => {
     res.sendFile(path.resolve('public/openapi.json'));

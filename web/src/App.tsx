@@ -1,5 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
+import { isUnauthorized } from './auth/errors';
+import {
+  installAuthNavigationGuards,
+  replaceAuthHistory,
+  type AuthView,
+} from './auth/navigation-guard';
+import {
+  clearSession,
+  getToken,
+  setToken as persistToken,
+  subscribeAuth,
+} from './auth/session';
 
 type Page = 'commands' | 'workflows' | 'rules' | 'decisions' | 'approvals' | 'platform' | 'voice';
 
@@ -51,8 +63,9 @@ const PAGES: Array<{ id: Page; label: string }> = [
 ];
 
 export function App() {
+  const [view, setView] = useState<AuthView>(() => (getToken() ? 'app' : 'login'));
   const [page, setPage] = useState<Page>('commands');
-  const [token, setToken] = useState('');
+  const [token, setToken] = useState(() => getToken() ?? '');
   const [health, setHealth] = useState('offline');
   const [summary, setSummary] = useState<Summary | null>(null);
   const [rules, setRules] = useState<Array<{ name: string; logical_operator?: string }>>([]);
@@ -70,9 +83,31 @@ export function App() {
   const [voiceText, setVoiceText] = useState('');
   const [voiceOut, setVoiceOut] = useState('');
   const [listening, setListening] = useState(false);
+  const [booting, setBooting] = useState(() => Boolean(getToken()));
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
+  const enterApp = useCallback((authToken: string) => {
+    persistToken(authToken);
+    setToken(authToken);
+    setView('app');
+    replaceAuthHistory('app');
+  }, []);
+
+  const enterLogin = useCallback((reason?: string) => {
+    clearSession(reason ?? 'logout');
+    setToken('');
+    setSummary(null);
+    setRules([]);
+    setCmdOut('');
+    setDecisionOut('');
+    setVoiceOut('');
+    setView('login');
+    replaceAuthHistory('login');
+  }, []);
 
   const refresh = useCallback(async (authToken: string) => {
-    const healthRes = (await fetch('/api/health').then((r) => r.json())) as {
+    const healthRes = (await fetch('/api/health', { cache: 'no-store' }).then((r) => r.json())) as {
       checks: { database: string; cache: string };
     };
     setHealth(`db:${healthRes.checks.database} cache:${healthRes.checks.cache}`);
@@ -89,24 +124,82 @@ export function App() {
     setRules(rulesRes.rules ?? []);
   }, []);
 
+  const bootstrapSession = useCallback(
+    async (authToken: string) => {
+      setError('');
+      setBooting(true);
+      try {
+        await refresh(authToken);
+        enterApp(authToken);
+      } catch (e: unknown) {
+        enterLogin(isUnauthorized(e) ? 'unauthorized' : 'bootstrap_failed');
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBooting(false);
+      }
+    },
+    [enterApp, enterLogin, refresh],
+  );
+
   const connect = async () => {
     setError('');
+    setBooting(true);
     try {
       const data = await api<{ token: string }>('/auth/dev-token', {
         method: 'POST',
         body: { userId: 'dashboard-user', role: 'owner' },
+        skipAuthClear: true,
       });
-      setToken(data.token);
       await refresh(data.token);
+      enterApp(data.token);
     } catch (e: unknown) {
+      enterLogin('login_failed');
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBooting(false);
     }
   };
 
   useEffect(() => {
-    void connect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const existing = getToken();
+    if (existing) {
+      void bootstrapSession(existing);
+    } else {
+      replaceAuthHistory('login');
+      setBooting(false);
+    }
+
+    const unsubAuth = subscribeAuth((snapshot) => {
+      if (!snapshot.token && viewRef.current === 'app') {
+        setToken('');
+        setSummary(null);
+        setView('login');
+        replaceAuthHistory('login');
+      }
+    });
+
+    const uninstallGuards = installAuthNavigationGuards({
+      getView: () => viewRef.current,
+      isAuthenticated: () => Boolean(getToken()),
+      onRequireApp: () => {
+        const t = getToken();
+        if (t) {
+          setToken(t);
+          setView('app');
+        }
+      },
+      onRequireLogin: () => {
+        setToken('');
+        setSummary(null);
+        setView('login');
+      },
+    });
+
+    return () => {
+      unsubAuth();
+      uninstallGuards();
+    };
+  }, [bootstrapSession]);
 
   const runCommand = async () => {
     setError('');
@@ -119,6 +212,7 @@ export function App() {
       setCmdOut(JSON.stringify(result, null, 2));
       await refresh(token);
     } catch (e: unknown) {
+      if (isUnauthorized(e)) enterLogin('unauthorized');
       setError(e instanceof Error ? e.message : String(e));
     }
   };
@@ -126,25 +220,27 @@ export function App() {
   const runWorkflow = async () => {
     setError('');
     try {
-      const bodyPayload =
+      const body =
         workflow === 'career.job-application'
           ? {
-              keywords: ['TypeScript'],
-              location: 'Remote',
-              resumeId: 'primary-resume-1',
-              minSalary: 100000,
+              name: workflow,
+              payload: {
+                keywords: ['TypeScript'],
+                location: 'Remote',
+                resumeId: 'primary-resume-1',
+                minSalary: 90000,
+              },
             }
-          : workflow === 'system.demo'
-            ? { message: 'hi', followUp: 'there' }
-            : {};
-      const result = await api<{ status: string }>('/workflows', {
+          : { name: workflow, payload: { message: 'hello', followUp: 'world' } };
+      const result = await api('/workflows', {
         method: 'POST',
         token,
-        body: { name: workflow, payload: bodyPayload },
+        body,
       });
-      setCmdOut(`${workflow}: ${result.status}`);
+      setCmdOut(JSON.stringify(result, null, 2));
       await refresh(token);
     } catch (e: unknown) {
+      if (isUnauthorized(e)) enterLogin('unauthorized');
       setError(e instanceof Error ? e.message : String(e));
     }
   };
@@ -156,13 +252,14 @@ export function App() {
         method: 'POST',
         token,
         body: {
-          name: ruleName || 'untitled-rule',
+          name: ruleName,
           logicalOperator: 'AND',
-          conditions: JSON.parse(ruleJson || '[]'),
+          conditions: JSON.parse(ruleJson),
         },
       });
       await refresh(token);
     } catch (e: unknown) {
+      if (isUnauthorized(e)) enterLogin('unauthorized');
       setError(e instanceof Error ? e.message : String(e));
     }
   };
@@ -170,7 +267,7 @@ export function App() {
   const runDecision = async () => {
     setError('');
     try {
-      const body = JSON.parse(decisionJson);
+      const body = JSON.parse(decisionJson) as Record<string, unknown>;
       const result = await api('/decision/evaluate', {
         method: 'POST',
         token,
@@ -178,17 +275,23 @@ export function App() {
       });
       setDecisionOut(JSON.stringify(result, null, 2));
     } catch (e: unknown) {
+      if (isUnauthorized(e)) enterLogin('unauthorized');
       setError(e instanceof Error ? e.message : String(e));
     }
   };
 
   const approve = async (id: string) => {
-    await api(`/approvals/${id}/resolve`, {
-      method: 'POST',
-      token,
-      body: { decision: 'APPROVED' },
-    });
-    await refresh(token);
+    try {
+      await api(`/approvals/${id}/resolve`, {
+        method: 'POST',
+        token,
+        body: { decision: 'APPROVED' },
+      });
+      await refresh(token);
+    } catch (e: unknown) {
+      if (isUnauthorized(e)) enterLogin('unauthorized');
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const speak = (text: string) => {
@@ -215,6 +318,7 @@ export function App() {
       speak(result.intent.spokenReply);
       await refresh(token);
     } catch (e: unknown) {
+      if (isUnauthorized(e)) enterLogin('unauthorized');
       setError(e instanceof Error ? e.message : String(e));
     }
   };
@@ -251,14 +355,51 @@ export function App() {
     recognition.start();
   };
 
+  if (booting) {
+    return (
+      <main>
+        <section>
+          <h2>Restoring session…</h2>
+          <p className="sub">Validating auth before rendering the control plane.</p>
+        </section>
+      </main>
+    );
+  }
+
+  // Hard gate: authenticated users never see the login shell (blocks Back→Login).
+  if (view === 'login' || !token) {
+    return (
+      <>
+        <header>
+          <h1>Jarvis-V1</h1>
+          <p className="sub">Sign in to open the CommandOS control plane</p>
+          {error ? <div className="error">{error}</div> : null}
+        </header>
+        <main>
+          <section>
+            <h2>Login</h2>
+            <p className="sub">
+              Uses a development JWT. Browser Back cannot reopen this page once you are signed in.
+            </p>
+            <div className="row">
+              <button type="button" onClick={() => void connect()} disabled={booting}>
+                Connect
+              </button>
+            </div>
+          </section>
+        </main>
+      </>
+    );
+  }
+
   return (
     <>
       <header>
         <h1>Jarvis-V1</h1>
         <p className="sub">React CommandOS control plane</p>
         <div className="row">
-          <button type="button" onClick={() => void connect()}>
-            Connect
+          <button type="button" className="ghost" onClick={() => enterLogin('manual')}>
+            Log out
           </button>
           <span className={`status ${token ? 'ok' : 'warn'}`}>{health}</span>
         </div>
