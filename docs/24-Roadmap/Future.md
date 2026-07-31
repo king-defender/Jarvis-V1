@@ -14,16 +14,24 @@ All planned product phases are done. There is **no remaining engineering backlog
 
 ## Operator-only step (not code)
 
-1. Install [Ollama](https://ollama.com)
-2. `ollama pull llama3.2`
-3. Keep Ollama running (default `http://127.0.0.1:11434`)
+Personal use (your PC + MongoDB Compass):
 
-Until then, drafts use the deterministic offline composer automatically.
+1. Keep Mongo running on `127.0.0.1:27017` (no Docker required)
+2. `npm install && npm run migrate && npm run dev`
+3. Optional for better AI drafts: install [Ollama](https://ollama.com) → `ollama pull llama3.2`
 
-## Optional extras (not required)
+Until Ollama is up, drafts use the deterministic offline composer automatically.  
+**Do not add cloud AI keys** for personal use — leave Anthropic/Gemini empty.
 
-* SMTP, GitHub/Slack tokens, Playwright Chromium, LinkedIn cookies
-* Cloud keys only if you switch to `AI_MODE=hybrid`
+See [PERSONAL_SETUP.md](../../PERSONAL_SETUP.md).
+
+## Optional extras (not required — ignore for personal use)
+
+* SMTP (real email sending)
+* GitHub / Slack tokens
+* Playwright Chromium (only if fetch browser is not enough)
+* Redis (only for async queue/cache at scale)
+* Cloud AI keys only if you deliberately switch to `AI_MODE=hybrid`
 
 ## Intentionally out of scope
 

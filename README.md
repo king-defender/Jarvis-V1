@@ -81,39 +81,27 @@ web/                React dashboard (Vite → public/dashboard/)
 
 ---
 
-## Quick start
+## Quick start (personal PC — no Docker)
 
-### Prerequisites
-
-- Node.js 20+
-- MongoDB (local or Docker)
-- Optional: Redis, [Ollama](https://ollama.com)
-
-### Run locally
+You already use **MongoDB Compass**. Point the app at that Mongo; do **not** require Docker.
 
 ```bash
-cp .env.example .env
-docker compose up mongo-db -d          # or use your own Mongo
+cp .env.example .env          # already Ollama-ready, BROWSER_ENGINE=fetch
 npm install
 npm run migrate
 npm run dev
 ```
 
-Open:
-
 - Dashboard: http://localhost:8080/dashboard/
-- Health: http://localhost:8080/api/health
-- OpenAPI: http://localhost:8080/openapi.json
-- Widgets: http://localhost:8080/widgets/?id=status
+- See **[PERSONAL_SETUP.md](./PERSONAL_SETUP.md)** if you return after months — required vs ignore list.
 
-### Enable local LLM (recommended)
+### Optional local LLM
 
 ```bash
 ollama pull llama3.2
-# keep Ollama running — defaults to http://127.0.0.1:11434
 ```
 
-`.env` ships with `AI_MODE=ollama`. If Ollama is down, drafts fall back to the offline composer automatically.
+No Anthropic/Gemini keys needed for personal use.
 
 ### Production-style build
 

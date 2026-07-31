@@ -1,0 +1,79 @@
+# Personal local setup (no Docker, no cloud AI keys)
+
+Use this when you return in a few months. Jarvis-V1 is built to run on **your PC** with MongoDB you already have (Compass) and optional **Ollama**. Docker is **not required**.
+
+## Checked on this machine (Aug 2026 snapshot)
+
+| Check | Status |
+| --- | --- |
+| Node.js | Installed (`v24`) |
+| MongoDB on `127.0.0.1:27017` | **Up** (Compass-compatible) |
+| Redis | Not running — **OK, not required** |
+| Ollama | Not running — install when you want local LLM drafts |
+| Docker | Present on PATH — **do not need it** for this setup |
+| Cloud AI keys | **Not used** (personal project) |
+
+## What you need vs what you can ignore
+
+### Required
+1. **Node 20+** — already installed  
+2. **MongoDB** — already running locally; DB name in `.env`: `command_os`  
+3. Start the app:
+   ```bash
+   cd c:\Users\hp\Downloads\sgdfs
+   npm install
+   npm run migrate
+   npm run dev
+   ```
+4. Open http://localhost:8080/dashboard/ → **Connect**
+
+### Strongly recommended (for AI drafts)
+5. Install [Ollama](https://ollama.com)  
+6. `ollama pull llama3.2`  
+7. Leave Ollama running  
+
+Until Ollama is up, the app still works; drafts use the built-in offline composer (no keys).
+
+### Not required for personal use (leave blank in `.env`)
+Explained below — empty values are correct.
+
+---
+
+## What those “optional” words mean
+
+| Term | What it is | Do you need it? |
+| --- | --- | --- |
+| **SMTP** | Mail server settings so the app can send real emails (Gmail/Outlook/etc.) | **No.** Without it, alerts/emails are stored locally in Mongo. Fine for personal use. |
+| **GitHub token** | Personal access token so commands can call GitHub (PR review, profile, clone APIs) | **No**, unless you want live GitHub PR review against private repos. |
+| **Slack webhook** | URL so alerts post into a Slack channel | **No.** Dashboard Approvals + local notify are enough. |
+| **Playwright** | Full browser engine (Chromium) for screenshots / JS-heavy pages | **No** for speed. `.env` uses `BROWSER_ENGINE=fetch` (lightweight HTTP). Use Playwright later only if screenshots break. |
+| **Redis** | In-memory cache + background job queue | **No** for personal use. App runs without it (sync workflows). Add only if you want heavy async queues later. |
+| **Cloud AI keys** (Anthropic / Gemini) | Paid remote LLM APIs | **No.** You chose local Ollama / offline composer. Keep `AI_MODE=ollama` and leave keys empty. |
+
+---
+
+## Fast personal defaults (already set)
+
+- `AI_MODE=ollama` — local LLM, no cloud keys  
+- `BROWSER_ENGINE=fetch` — faster startup, no Chromium download  
+- `MONGO_URL=mongodb://127.0.0.1:27017` — your Compass Mongo  
+- Redis / SMTP / GitHub / Slack — empty or unused  
+
+## When you come back (checklist)
+
+```text
+[ ] Mongo running (Compass can connect to 127.0.0.1:27017)
+[ ] cd project → npm install → npm run migrate → npm run dev
+[ ] Dashboard Connect works
+[ ] (optional) Ollama installed + llama3.2 pulled → Platform page shows Ollama up
+[ ] Ignore Docker, Redis, SMTP, Slack, GitHub, cloud keys unless you explicitly want them
+```
+
+## Smoke tests after start
+
+```bash
+curl http://localhost:8080/api/health
+# database should be "up"; cache may be "down" without Redis — that is OK
+```
+
+Dashboard → Platform: AI mode `ollama`; if Ollama is off, drafts still work offline.
