@@ -100,6 +100,37 @@ export interface PlatformDeps {
 export function getPlatformCommandRegistrations(deps: PlatformDeps): CommandRegistration[] {
   return [
     {
+      command: 'platform.ai-status',
+      schema: z.object({}),
+      handler: async () => deps.modelRouter.status(),
+    },
+    {
+      command: 'platform.ai-complete',
+      schema: z.object({
+        prompt: z.string().min(1),
+        systemPrompt: z.string().optional(),
+        temperature: z.number().min(0).max(2).optional(),
+        maxTokens: z.number().int().positive().optional(),
+      }),
+      handler: async (payload: {
+        prompt: string;
+        systemPrompt?: string;
+        temperature?: number;
+        maxTokens?: number;
+      }) => {
+        const input: {
+          prompt: string;
+          systemPrompt?: string;
+          temperature?: number;
+          maxTokens?: number;
+        } = { prompt: payload.prompt };
+        if (payload.systemPrompt !== undefined) input.systemPrompt = payload.systemPrompt;
+        if (payload.temperature !== undefined) input.temperature = payload.temperature;
+        if (payload.maxTokens !== undefined) input.maxTokens = payload.maxTokens;
+        return deps.modelRouter.complete(input);
+      },
+    },
+    {
       command: 'platform.decide',
       schema: DecideSchema,
       handler: async (payload: z.infer<typeof DecideSchema>, context) => {

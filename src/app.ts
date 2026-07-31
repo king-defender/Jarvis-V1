@@ -389,13 +389,25 @@ async function main(): Promise<void> {
       workflowVersions,
       storage,
       notifications,
+      modelRouter,
     }),
   );
 
+  const aiStatus = await modelRouter.status().catch(() => null);
   const server = app.listen(config.app.port, () => {
     log.info('CommandOS API listening', {
       port: config.app.port,
       env: config.app.env,
+      aiMode: config.ai.mode,
+      ollama: aiStatus
+        ? {
+            baseUrl: aiStatus.ollama.baseUrl,
+            reachable: aiStatus.ollama.reachable,
+            model: aiStatus.ollama.model,
+            models: aiStatus.ollama.models.slice(0, 8),
+            error: aiStatus.ollama.error,
+          }
+        : undefined,
       commands: commandRouter.listCommands().length,
       workflows: workflowRuntime.list(),
       queueEnabled: queue.isEnabled(),

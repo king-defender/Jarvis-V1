@@ -27,7 +27,7 @@ export function createRequireRoleMiddleware(minRole: Role) {
 export function canExecuteCommand(role: Role | undefined, command: string): boolean {
   const r = role ?? 'member';
   if (r === 'owner' || r === 'admin' || r === 'member') return true;
-  return command === 'system.ping' || command.startsWith('assistant.');
+  return command === 'system.ping' || command.startsWith('assistant.') || command === 'platform.ai-status';
 }
 
 export function canMutatePlatform(role: Role | undefined): boolean {

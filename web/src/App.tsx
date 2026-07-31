@@ -10,6 +10,17 @@ type Summary = {
   plugins?: Array<{ id: string }>;
   connectors?: string[];
   metrics?: unknown;
+  ai?: {
+    mode: string;
+    ollama: {
+      configured: boolean;
+      reachable: boolean;
+      model: string;
+      baseUrl: string | null;
+      models: string[];
+      error?: string;
+    };
+  };
 };
 
 const DEFAULT_DECISION = `{
@@ -400,7 +411,19 @@ export function App() {
                 plugins: {(summary?.plugins ?? []).map((p) => p.id).join(', ') || 'none'}
               </li>
               <li>connectors: {(summary?.connectors ?? []).join(', ') || 'none'}</li>
+              <li>
+                AI: {summary?.ai?.mode ?? '—'}
+                {summary?.ai?.ollama
+                  ? ` · Ollama ${summary.ai.ollama.reachable ? 'up' : summary.ai.ollama.configured ? 'down' : 'off'} (${summary.ai.ollama.model})`
+                  : ''}
+              </li>
             </ul>
+            {summary?.ai?.ollama?.error ? (
+              <p className="sub">{summary.ai.ollama.error}</p>
+            ) : null}
+            {summary?.ai?.ollama?.models?.length ? (
+              <p className="sub">Models: {summary.ai.ollama.models.join(', ')}</p>
+            ) : null}
             <pre>{JSON.stringify(summary?.metrics ?? {}, null, 2)}</pre>
           </section>
         )}

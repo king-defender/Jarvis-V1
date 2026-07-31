@@ -7,6 +7,7 @@ import type { SystemConfig } from '../../config.js';
 import type { DecisionEngine } from '../../evaluation/decision/decision-engine.js';
 import type { CacheService } from '../../infrastructure/cache/redis.service.js';
 import type { ConnectorRegistry } from '../../infrastructure/connectors/connector.js';
+import type { ModelRouterService } from '../../infrastructure/ai/model-router.service.js';
 import type { DatabaseService } from '../../infrastructure/database/connection.service.js';
 import type {
   MetricsService,
@@ -125,6 +126,7 @@ export function createApiRouter(deps: {
   workflowVersions: VersionRegistry<WorkflowDefinition>;
   storage: IStorageService;
   notifications: INotificationService;
+  modelRouter: ModelRouterService;
 }): Router {
   const router = Router();
   const requireAuth = createAuthMiddleware(deps.config);
@@ -133,14 +135,53 @@ export function createApiRouter(deps: {
   router.get('/health', async (_req, res) => {
     const databaseOk = await deps.database.healthCheck().catch(() => false);
     const cacheOk = await deps.cache.healthCheck().catch(() => false);
+    const ai = await deps.modelRouter.status().catch(() => null);
     res.status(databaseOk ? 200 : 503).json({
       status: databaseOk ? 'ok' : 'degraded',
       version: '0.1.0',
       checks: {
         database: databaseOk ? 'up' : 'down',
         cache: cacheOk ? 'up' : 'down',
+        ollama: ai?.ollama.reachable ? 'up' : ai?.ollama.configured ? 'down' : 'skipped',
       },
+      ai: ai
+        ? {
+            mode: ai.mode,
+            ollamaReachable: ai.ollama.reachable,
+            localModel: ai.ollama.model,
+          }
+        : undefined,
     });
+  });
+
+  router.get('/ai/status', requireAuth, async (_req, res) => {
+    res.json(await deps.modelRouter.status());
+  });
+
+  router.post('/ai/complete', requireAuth, async (req, res) => {
+    if (!canMutatePlatform(req.user?.role)) {
+      res.status(403).json({ error: 'FORBIDDEN' });
+      return;
+    }
+    const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt : '';
+    if (!prompt.trim()) {
+      res.status(400).json({ error: 'prompt required' });
+      return;
+    }
+    const input: {
+      prompt: string;
+      systemPrompt?: string;
+      temperature?: number;
+      maxTokens?: number;
+    } = { prompt };
+    if (typeof req.body?.systemPrompt === 'string') input.systemPrompt = req.body.systemPrompt;
+    if (typeof req.body?.temperature === 'number') input.temperature = req.body.temperature;
+    if (typeof req.body?.maxTokens === 'number') input.maxTokens = req.body.maxTokens;
+    try {
+      res.json(await deps.modelRouter.complete(input));
+    } catch (error: unknown) {
+      res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   router.get('/openapi.json', (_req, res) => {
@@ -669,6 +710,7 @@ export function createApiRouter(deps: {
       plugins: deps.plugins.list(),
       connectors: deps.connectors.list(),
       metrics: deps.metrics.snapshot(),
+      ai: await deps.modelRouter.status(),
     });
   });
 

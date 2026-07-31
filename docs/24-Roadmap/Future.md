@@ -12,10 +12,12 @@
 ## Offline-first (default)
 * `AI_MODE=offline` (default) — **no API keys required**
 * ModelRouter uses a deterministic composer for drafts (resume, cover letter, interview, PR review, etc.)
-* External providers only if you set `AI_MODE=hybrid` **and** provide keys / Ollama
+* `AI_MODE=ollama` — local Ollama (`OLLAMA_BASE_URL` defaults to `http://127.0.0.1:11434`, model `AI_LOCAL_MODEL`)
+* `AI_MODE=hybrid` — Ollama (if configured) → Anthropic/Gemini keys → offline composer
 
 ## Still optional integrations
 * SMTP, GitHub/Slack tokens, Playwright Chromium, LinkedIn cookies
+* Cloud AI keys only needed for `hybrid` without Ollama
 * Rule editor remains structured JSON (not a drag-and-drop canvas)
 
 ## Intentionally lightweight

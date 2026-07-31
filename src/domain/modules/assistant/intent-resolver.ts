@@ -98,6 +98,16 @@ export function interpretUtterance(utterance: string): AssistantIntent {
     };
   }
 
+  if (/\b(ai status|ollama|model status)\b/.test(text)) {
+    return {
+      kind: 'command',
+      command: 'platform.ai-status',
+      payload: {},
+      spokenReply: 'Checking AI and Ollama status.',
+      confidence: 0.9,
+    };
+  }
+
   return {
     kind: 'unknown',
     payload: {},

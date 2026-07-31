@@ -16,12 +16,31 @@ export interface ModelRoutingResponse {
   degraded: boolean;
 }
 
+export interface AiProviderStatus {
+  mode: 'offline' | 'ollama' | 'hybrid';
+  ollama: {
+    configured: boolean;
+    baseUrl: string | null;
+    model: string;
+    reachable: boolean;
+    models: string[];
+    error?: string;
+  };
+  cloud: {
+    anthropic: boolean;
+    gemini: boolean;
+  };
+  spentUsd: number;
+  monthlyLimitUsd: number;
+}
+
 type ProviderCall = (request: ModelRoutingRequest) => Promise<ModelRoutingResponse>;
 
 /**
- * Offline-first text composer.
- * External providers (Anthropic/Gemini/Ollama) are opt-in via AI_MODE=hybrid + keys.
- * Default AI_MODE=offline never requires API keys — the OS runs by itself.
+ * Offline-first text composer with optional Ollama / cloud providers.
+ * - offline: deterministic composer only (no network)
+ * - ollama: local Ollama first, deterministic fallback
+ * - hybrid: Ollama (if configured) → Anthropic → Gemini → deterministic
  */
 export class ModelRouterService {
   private spentUsd = 0;
@@ -43,18 +62,7 @@ export class ModelRouterService {
       return this.deterministicCompose(request);
     }
 
-    const tiers: Array<{ name: string; run: ProviderCall }> = [];
-
-    if (this.config.ai.anthropicApiKey || this.config.ai.providerKey) {
-      tiers.push({ name: 'anthropic', run: (r) => this.callAnthropic(r) });
-    }
-    if (this.config.ai.geminiApiKey) {
-      tiers.push({ name: 'gemini', run: (r) => this.callGemini(r) });
-    }
-    if (this.config.ai.ollamaBaseUrl) {
-      tiers.push({ name: 'ollama', run: (r) => this.callOllama(r) });
-    }
-
+    const tiers = this.buildTiers(mode);
     if (tiers.length === 0) {
       return this.deterministicCompose(request);
     }
@@ -84,6 +92,100 @@ export class ModelRouterService {
       attemptedTiers: tiers.map((t) => t.name),
     });
     return this.deterministicCompose(request);
+  }
+
+  /** Probe Ollama + report configured providers (safe for dashboard/health). */
+  async status(): Promise<AiProviderStatus> {
+    const baseUrl = this.ollamaBase();
+    const ollamaConfigured = Boolean(baseUrl);
+    let reachable = false;
+    let models: string[] = [];
+    let error: string | undefined;
+
+    if (baseUrl) {
+      try {
+        models = await this.listOllamaModels();
+        reachable = true;
+      } catch (err: unknown) {
+        error = err instanceof Error ? err.message : String(err);
+      }
+    }
+
+    const status: AiProviderStatus = {
+      mode: this.config.ai.mode,
+      ollama: {
+        configured: ollamaConfigured,
+        baseUrl,
+        model: this.config.ai.localModel,
+        reachable,
+        models,
+      },
+      cloud: {
+        anthropic: Boolean(this.config.ai.anthropicApiKey || this.config.ai.providerKey),
+        gemini: Boolean(this.config.ai.geminiApiKey),
+      },
+      spentUsd: this.spentUsd,
+      monthlyLimitUsd: this.config.ai.monthlyLimitUsd,
+    };
+    if (error) status.ollama.error = error;
+    return status;
+  }
+
+  async listOllamaModels(): Promise<string[]> {
+    const base = this.ollamaBase();
+    if (!base) throw new Error('Ollama base URL not configured');
+
+    const response = await this.fetchWithTimeout(`${base}/api/tags`, { method: 'GET' });
+    if (!response.ok) {
+      throw new Error(`Ollama tags ${response.status}: ${await response.text()}`);
+    }
+    const body = (await response.json()) as {
+      models?: Array<{ name?: string; model?: string }>;
+    };
+    return (body.models ?? [])
+      .map((m) => m.name || m.model || '')
+      .filter(Boolean)
+      .sort();
+  }
+
+  private buildTiers(mode: 'ollama' | 'hybrid'): Array<{ name: string; run: ProviderCall }> {
+    const tiers: Array<{ name: string; run: ProviderCall }> = [];
+
+    // Local-first: Ollama before cloud APIs
+    if (this.ollamaBase()) {
+      tiers.push({ name: 'ollama', run: (r) => this.callOllama(r) });
+    }
+
+    if (mode === 'hybrid') {
+      if (this.config.ai.anthropicApiKey || this.config.ai.providerKey) {
+        tiers.push({ name: 'anthropic', run: (r) => this.callAnthropic(r) });
+      }
+      if (this.config.ai.geminiApiKey) {
+        tiers.push({ name: 'gemini', run: (r) => this.callGemini(r) });
+      }
+    }
+
+    return tiers;
+  }
+
+  private ollamaBase(): string | null {
+    const raw = this.config.ai.ollamaBaseUrl?.trim();
+    if (!raw) return null;
+    return raw.replace(/\/$/, '');
+  }
+
+  private async fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+  ): Promise<Response> {
+    const timeoutMs = this.config.ai.ollamaTimeoutMs ?? 120_000;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Rule/template composer — no network, no keys. */
@@ -132,7 +234,7 @@ export class ModelRouterService {
   private extractKeywords(text: string): string[] {
     const stop = new Set([
       'the', 'and', 'for', 'with', 'this', 'that', 'from', 'your', 'have', 'will',
-      'are', 'was', 'were', 'been', 'into', 'about', 'write', 'return', 'plain',
+      'are', 'was', 'were', 'into', 'about', 'write', 'return', 'plain',
     ]);
     const counts = new Map<string, number>();
     for (const token of text.toLowerCase().match(/\b[a-z][a-z0-9+#.()-]{2,}\b/g) ?? []) {
@@ -328,14 +430,15 @@ export class ModelRouterService {
   }
 
   private async callOllama(request: ModelRoutingRequest): Promise<ModelRoutingResponse> {
-    const base = this.config.ai.ollamaBaseUrl?.replace(/\/$/, '');
+    const base = this.ollamaBase();
     if (!base) throw new Error('Ollama base URL missing');
 
-    const response = await fetch(`${base}/api/chat`, {
+    const model = this.config.ai.localModel;
+    const response = await this.fetchWithTimeout(`${base}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: this.config.ai.localModel,
+        model,
         stream: false,
         messages: [
           ...(request.systemPrompt
@@ -351,13 +454,29 @@ export class ModelRouterService {
     });
 
     if (!response.ok) {
-      throw new Error(`Ollama ${response.status}: ${await response.text()}`);
+      const detail = await response.text();
+      throw new Error(
+        `Ollama ${response.status}: ${detail || 'request failed'}. ` +
+          `Is Ollama running, and have you pulled model "${model}"? (ollama pull ${model})`,
+      );
     }
 
-    const body = (await response.json()) as { message?: { content?: string } };
+    const body = (await response.json()) as {
+      message?: { content?: string };
+      model?: string;
+      error?: string;
+    };
+    if (body.error) {
+      throw new Error(`Ollama error: ${body.error}`);
+    }
+    const text = body.message?.content?.trim() ?? '';
+    if (!text) {
+      throw new Error(`Ollama returned empty content for model "${model}"`);
+    }
+
     return {
-      text: body.message?.content ?? '',
-      modelUsed: this.config.ai.localModel,
+      text,
+      modelUsed: body.model || model,
       costEstimateUsd: 0,
       degraded: false,
     };
