@@ -57,6 +57,15 @@ export class ApprovalService {
       commandPattern: 'platform.send-email',
       notificationChannel: 'dashboard',
     },
+    // Broad system access (file writes/deletes anywhere, shell exec, app control, input
+    // automation, self-improvement) lands under this namespace in later phases. Gating the
+    // whole namespace here means every command added under it is approval-gated the moment
+    // it's registered, rather than depending on remembering to add a policy per command.
+    {
+      id: 'system-access',
+      commandPattern: 'system.*',
+      notificationChannel: 'dashboard',
+    },
   ];
 
   constructor(
