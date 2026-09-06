@@ -1,8 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import simpleGit from 'simple-git';
 import type { IStorageService } from './storage.service.js';
 import type { ModelRouterService } from '../ai/model-router.service.js';
+import { assertPathAllowed } from '../security/protected-paths.js';
 
 const ALLOWED_PREFIXES = ['src/', 'web/src/', 'docs/', 'scripts/', 'public/widgets/'];
 const ALLOWED_ROOT_FILES = new Set([
@@ -64,6 +66,10 @@ export class CodeSelfEditService {
     if (full !== root && !full.startsWith(rootWithSep)) {
       throw new Error(`Path escapes project root: ${relPath}`);
     }
+    // Belt-and-suspenders: even if the allowlist above is ever loosened by mistake, this
+    // guard still refuses desktop/, .git/, node_modules/, and the safety-critical files
+    // themselves. Self-improvement is the exact scenario this guard exists for.
+    assertPathAllowed(full);
     return full;
   }
 
@@ -151,6 +157,7 @@ export class CodeSelfEditService {
         }
         await fs.writeFile(full, current.replace(oldString, newString), 'utf8');
       }
+      await this.commitChange(relPath, String(doc.rationale ?? 'Self-edit'), proposalId);
       await this.storage.collection('code_change_proposals').updateOne(
         { id: proposalId },
         { $set: { status: 'applied', applied_at: now, updated_at: now, error: null } },
@@ -178,6 +185,22 @@ export class CodeSelfEditService {
     const proposal = await this.proposeFromInstruction(input);
     const applied = await this.applyProposal(proposal.id);
     return { proposal: applied, applied: true };
+  }
+
+  /**
+   * Records the applied edit as its own git commit rather than a bare overwrite, so
+   * `git revert` is always available as a second recovery path independent of the kill
+   * switch. Best-effort: a missing git binary or repo must never block the edit itself,
+   * since the file write already succeeded by the time this runs.
+   */
+  private async commitChange(relPath: string, rationale: string, proposalId: string): Promise<void> {
+    try {
+      const git = simpleGit({ baseDir: this.projectRoot });
+      await git.add(relPath);
+      await git.commit(`Self-edit: ${rationale.slice(0, 72)}\n\nProposal ${proposalId}`);
+    } catch {
+      // No git repo, nothing staged, or git not installed - the edit still applied.
+    }
   }
 
   private toProposal(doc: Record<string, unknown>): CodeChangeProposal {

@@ -57,6 +57,16 @@ export class ApprovalService {
       commandPattern: 'platform.send-email',
       notificationChannel: 'dashboard',
     },
+    // platform.self-edit lets Jarvis rewrite its own source under an allowlist and, by
+    // config default (SELF_CODE_EDIT), applies immediately with no second step. Gating it
+    // here means approval is enforced at dispatch time regardless of that config flag or
+    // which entry point invoked it (dashboard, intent resolver, decision engine) - "always
+    // approval-gated, no exception" per the self-improvement design.
+    {
+      id: 'self-edit',
+      commandPattern: 'platform.self-edit',
+      notificationChannel: 'dashboard',
+    },
     // Broad system access (file writes/deletes anywhere, shell exec, app control, input
     // automation, self-improvement) lands under this namespace in later phases. Gating the
     // whole namespace here means every command added under it is approval-gated the moment

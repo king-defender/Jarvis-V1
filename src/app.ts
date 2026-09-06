@@ -234,7 +234,7 @@ async function main(): Promise<void> {
   };
 
   const registrations = [
-    ...getSystemCommandRegistrations(),
+    ...getSystemCommandRegistrations({ eventBus }),
     ...getAssistantCommandRegistrations({ memory }),
     ...getCareerCommandRegistrations({
       storage,

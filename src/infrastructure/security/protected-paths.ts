@@ -37,10 +37,16 @@ const PROTECTED_DIRS = [
   path.join(repoRoot, 'node_modules'),
 ];
 
+const approvalDir = path.join(repoRoot, 'src', 'orchestration', 'approval');
+
 const PROTECTED_FILES = [
   // Never let anything (including self-improvement) edit this guard out of existence.
   path.resolve(moduleDir, 'protected-paths.ts'),
   path.resolve(moduleDir, 'protected-paths.js'),
+  // Nor the approval gate itself - self-improvement editing this file is exactly the
+  // "Jarvis quietly disables its own oversight" scenario this whole layer exists to stop.
+  path.join(approvalDir, 'approval.service.ts'),
+  path.join(approvalDir, 'approval.service.js'),
 ];
 
 export class ProtectedPathError extends Error {
