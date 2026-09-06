@@ -293,6 +293,58 @@ curl -s -X POST http://localhost:8080/api/approvals/<id>/resolve \
 
 If the approval came from a **paused workflow**, approving executes the step and **resumes** the workflow; rejecting fails the workflow.
 
+### 7. System access & self-improvement
+
+Everything under `system.*` and `platform.self-edit` is **always** approval-gated (§6) — no
+config flag skips it. Kill switch (hotkey `Ctrl+Shift+Alt+Escape`, or tray "⛔ Emergency Stop")
+only exists when running through `desktop/` (`cd desktop && npm run start`), not `npm run dev`.
+
+```bash
+# Read/write/delete anywhere on disk (not sandboxed) — writes/deletes refuse desktop/, .git/,
+# node_modules/, and the approval/protected-paths guard files, even after approval.
+curl -s -X POST http://localhost:8080/api/command -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"command":"system.fs-read","payload":{"path":"package.json","encoding":"utf8"}}' | jq
+
+curl -s -X POST http://localhost:8080/api/command -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"command":"system.fs-write","payload":{"path":"C:\\path\\out.txt","content":"hi","encoding":"utf8"}}' | jq
+
+# App control — close-app takes pid OR processName, never its own backend pid
+curl -s -X POST http://localhost:8080/api/command -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"command":"system.launch-app","payload":{"command":"notepad.exe","args":[]}}' | jq
+
+curl -s -X POST http://localhost:8080/api/command -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"command":"system.list-processes","payload":{"filter":"chrome"}}' | jq
+
+# Shell — timeoutMs default 60000, max 300000; rejected up front if the command text
+# references a protected path
+curl -s -X POST http://localhost:8080/api/command -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"command":"system.run-shell","payload":{"command":"dir","timeoutMs":30000}}' | jq
+
+# Mouse/keyboard automation (Windows only) — batch a whole task into one approval, actions
+# run in order; "keys" uses raw SendKeys syntax (e.g. "^{ESC}" = Ctrl+Escape)
+curl -s -X POST http://localhost:8080/api/command -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"command":"system.automate-input","payload":{"actions":[
+        {"type":"move","x":500,"y":400},
+        {"type":"click","button":"left"},
+        {"type":"type","text":"hello"}
+      ]}}' | jq
+
+# Self-improvement — allowlist only (src/, web/src/, docs/, scripts/, a few root files),
+# never desktop/, .git/, node_modules/, .env, or the safety guard files; applied edits land
+# as a git commit (git revert undoes one)
+curl -s -X POST http://localhost:8080/api/command -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"command":"platform.self-edit","payload":{"instruction":"add a note to docs/self-notes.md","apply":true}}' | jq
+```
+
+Full command list: §Modules & commands below. Design/threat-model detail: `desktop/README.md`.
+
 ---
 
 ## Modules & commands
