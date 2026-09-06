@@ -297,12 +297,24 @@ If the approval came from a **paused workflow**, approving executes the step and
 
 ## Modules & commands
 
-Eleven domain modules register **47** commands.
+Eleven domain modules register **65** commands.
 
 ### System
+`system.*` is a fully approval-gated namespace (see `ApprovalService`) - every command below
+requires a human to approve it via `/api/approvals/:id/resolve` before it executes, regardless
+of what triggered it (dashboard, intent resolver, workflow, decision engine).
+
 | Command | Purpose |
 | --- | --- |
 | `system.ping` | Health-style ping |
+| `system.fs-read` | Read any file/directory on disk (not sandboxed to the data dir) |
+| `system.fs-write` | Write any file on disk; refuses `desktop/`, `.git/`, `node_modules/`, and the approval/protected-paths guard files themselves |
+| `system.fs-delete` | Delete a file/directory on disk; same refusals as `fs-write` |
+| `system.launch-app` | Spawn any executable, detached |
+| `system.close-app` | Kill a process by pid or name; refuses to target its own backend pid |
+| `system.list-processes` | List running processes (optionally filtered by name) |
+| `system.run-shell` | Run a shell command with a timeout; best-effort scan refuses commands that reference a protected path |
+| `system.automate-input` | Windows-only mouse/keyboard automation (move/click/type/key/wait), driven by a generated PowerShell script - no native module dependency |
 
 ### Assistant
 | Command | Purpose |
@@ -386,6 +398,7 @@ Eleven domain modules register **47** commands.
 | `platform.evaluate-output` | Output evaluation |
 | `platform.classify-error` | Error classification |
 | `platform.connector-test` | Connector health |
+| `platform.self-edit` | AI-proposed edit to Jarvis's own source under an allowlist (`src/`, `web/src/`, `docs/`, `scripts/`, a few root docs); applies as a git commit. *(approval-gated, no exception - see `desktop/README.md`)* |
 
 Plugins under `plugins/` can register additional commands at boot.
 
