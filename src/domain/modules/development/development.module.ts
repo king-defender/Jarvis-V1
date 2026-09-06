@@ -9,7 +9,7 @@ import {
   type ISystemEventBus,
 } from '../../../infrastructure/services/event-bus.service.js';
 import { gitCloneTask } from '../../tasks/index.js';
-import { githubReviewSkill } from '../../skills/index.js';
+import { githubReviewSkill, scaffoldAppSkill } from '../../skills/index.js';
 import type { ModelRouterService } from '../../../infrastructure/ai/model-router.service.js';
 import type {
   PromptLibrary,
@@ -31,6 +31,12 @@ const ReviewPrSchema = z.object({
 
 const AuditRepoSchema = z.object({
   repoPath: z.string().min(1),
+});
+
+const ScaffoldAppSchema = z.object({
+  description: z.string().min(10),
+  stack: z.string().min(1).default('node'),
+  outputPath: z.string().min(1),
 });
 
 const CloneRepoSchema = z.object({
@@ -104,6 +110,54 @@ export function getDevelopmentCommandRegistrations(deps: {
         );
 
         return { filesCreated, durationMs: Date.now() - started };
+      },
+    },
+    {
+      command: 'development.scaffold-app',
+      schema: ScaffoldAppSchema,
+      handler: async (payload: z.infer<typeof ScaffoldAppSchema>) => {
+        const started = Date.now();
+        const baseRoot = path.resolve(deps.baseDataPath);
+        const root = path.resolve(baseRoot, payload.outputPath);
+        if (!root.startsWith(baseRoot + path.sep) && root !== baseRoot) {
+          throw new Error('outputPath escapes base data directory');
+        }
+
+        const result = await scaffoldAppSkill({
+          description: payload.description,
+          stack: payload.stack,
+          modelRouter: deps.modelRouter,
+          prompts: deps.prompts,
+          safety: deps.safety,
+        });
+
+        await fs.mkdir(root, { recursive: true });
+        const filesCreated: string[] = [];
+        for (const file of result.files) {
+          const relative = file.path.replace(/^[/\\]+/, '');
+          const full = path.resolve(root, relative);
+          // Skip any AI-suggested path that tries to escape the sandboxed output directory.
+          if (!full.startsWith(root + path.sep) && full !== root) continue;
+          await fs.mkdir(path.dirname(full), { recursive: true });
+          await fs.writeFile(full, file.content, 'utf8');
+          filesCreated.push(full);
+        }
+
+        deps.eventBus.publish(
+          createSystemEvent({
+            transactionId: randomUUID(),
+            eventName: 'development.app_scaffolded',
+            payload: { stack: payload.stack, filesCreated, degraded: result.degraded },
+            producer: 'DevelopmentModule',
+          }),
+        );
+
+        return {
+          plan: result.plan,
+          filesCreated,
+          degraded: result.degraded,
+          durationMs: Date.now() - started,
+        };
       },
     },
     {

@@ -322,7 +322,8 @@ Eleven domain modules register **47** commands.
 ### Development
 | Command | Purpose |
 | --- | --- |
-| `development.generate-boilerplate` | Scaffold project under data sandbox |
+| `development.generate-boilerplate` | Static skeleton (nextjs/vite/sqlite) under data sandbox — no AI |
+| `development.scaffold-app` | AI-drafted multi-file project scaffold from a plain-language description |
 | `development.review-pr` | PR review via GitHub + AI |
 | `development.audit-repo` | Secret/pattern scan (sandboxed path) |
 | `development.clone-repo` | Clone into data dir |

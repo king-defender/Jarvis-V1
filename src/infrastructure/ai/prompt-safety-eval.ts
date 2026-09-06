@@ -30,6 +30,20 @@ const PROMPTS: Record<string, PromptTemplate> = {
     system: 'You are a senior code reviewer. Be specific and actionable.',
     userTemplate: 'Review this pull request diff:\n\n{{diff}}',
   },
+  'development.scaffold-app': {
+    id: 'development.scaffold-app',
+    system:
+      'You are a pragmatic senior software architect. When asked to scaffold an application, ' +
+      'respond with ONLY strict JSON matching this shape: ' +
+      '{"plan":"<2-4 sentence plan>","files":[{"path":"<relative/file/path>","content":"<full file content>"}]}. ' +
+      'No markdown code fences, no prose outside the JSON object. ' +
+      'Every file must contain real, working code that runs together as a minimal but functional project — no TODOs, no placeholders.',
+    userTemplate:
+      'Project idea: {{description}}\nPreferred stack: {{stack}}\n\n' +
+      'Generate 4 to 12 files for a minimal, runnable starting point that implements the core idea end-to-end ' +
+      '(not just a hello-world shell). Include whatever package/config file the stack needs and a short README ' +
+      'with exact run commands. Respond with the JSON object only.',
+  },
   'startup.competitor': {
     id: 'startup.competitor',
     system: 'You analyze competitor websites for product strategy.',

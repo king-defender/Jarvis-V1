@@ -235,6 +235,91 @@ export async function competitorResearchSkill(input: {
   };
 }
 
+export async function scaffoldAppSkill(input: {
+  description: string;
+  stack: string;
+  modelRouter: ModelRouterService;
+  prompts: PromptLibrary;
+  safety: SafetyService;
+}): Promise<{
+  plan: string;
+  files: Array<{ path: string; content: string }>;
+  degraded: boolean;
+}> {
+  const rendered = input.prompts.render('development.scaffold-app', {
+    description: input.description.slice(0, 2000),
+    stack: input.stack,
+  });
+  input.safety.assertSafePrompt(rendered.prompt);
+  const ai = await input.modelRouter.complete({
+    systemPrompt: rendered.system,
+    prompt: rendered.prompt,
+    maxTokens: 4000,
+  });
+  const text = input.safety.sanitizeOutput(ai.text);
+  const parsed = parseScaffoldResponse(text);
+  if (parsed) {
+    return { plan: parsed.plan, files: parsed.files, degraded: ai.degraded };
+  }
+  return {
+    plan: `AI drafting was unavailable or returned an unparseable response, so this is a minimal ${input.stack} placeholder for: ${input.description.slice(0, 160)}`,
+    files: fallbackScaffoldFiles(input.stack),
+    degraded: true,
+  };
+}
+
+function parseScaffoldResponse(
+  text: string,
+): { plan: string; files: Array<{ path: string; content: string }> } | null {
+  const jsonText = extractJsonBlock(text);
+  if (!jsonText) return null;
+  try {
+    const data = JSON.parse(jsonText) as {
+      plan?: unknown;
+      files?: Array<{ path?: unknown; content?: unknown }>;
+    };
+    if (!Array.isArray(data.files) || data.files.length === 0) return null;
+    const files = data.files
+      .filter(
+        (f): f is { path: string; content: string } =>
+          typeof f?.path === 'string' &&
+          f.path.trim().length > 0 &&
+          typeof f?.content === 'string',
+      )
+      .slice(0, 30);
+    if (files.length === 0) return null;
+    return {
+      plan: typeof data.plan === 'string' && data.plan.trim() ? data.plan : 'Generated project scaffold.',
+      files,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function extractJsonBlock(text: string): string | null {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = (fenced?.[1] ?? text).trim();
+  const start = candidate.indexOf('{');
+  const end = candidate.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  return candidate.slice(start, end + 1);
+}
+
+function fallbackScaffoldFiles(stack: string): Array<{ path: string; content: string }> {
+  return [
+    {
+      path: 'README.md',
+      content: `# Generated scaffold\n\nAI drafting was unavailable, so this is a minimal ${stack} starter. Fill in real logic and re-run development.scaffold-app once AI is reachable.\n`,
+    },
+    {
+      path: 'package.json',
+      content:
+        JSON.stringify({ name: 'generated-app', private: true, version: '0.1.0' }, null, 2) + '\n',
+    },
+  ];
+}
+
 export async function githubReviewSkill(input: {
   diff: string;
   modelRouter: ModelRouterService;
