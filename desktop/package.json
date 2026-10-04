@@ -5,8 +5,8 @@
   "description": "Electron shell for Jarvis-V1 - owns the kill switch so it works even if the backend it launches is broken or has self-modified.",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "start": "npm run build && electron .",
+    "build": "node init && tsc -p tsconfig.json",
+    "start": "node init && npm run build && electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "reseal": "npm run build && node dist/rebaseline.js"
   },
